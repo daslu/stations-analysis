@@ -1,3 +1,4 @@
 {:deps {org.scicloj/clay {:mvn/version "2-beta8"}
-        org.scicloj/noj {:mvn/version "1-alpha34"}}
+        org.scicloj/noj {:mvn/version "1-alpha34"}
+        factual/geo {:mvn/version "3.0.1"}}
  :paths ["notebooks"]}
