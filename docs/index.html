@@ -107,26 +107,44 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </style>
 <style>.clay-limit-image-width .clay-image {max-width: 100%}
 </style>
-<script src="index_files/md-default0.js" type="text/javascript"></script>
 <script src="index_files/md-default1.js" type="text/javascript"></script>
+<script src="index_files/md-default2.js" type="text/javascript"></script>
+<script src="index_files/vega3.js" type="text/javascript"></script>
+<script src="index_files/vega4.js" type="text/javascript"></script>
+<script src="index_files/vega5.js" type="text/javascript"></script>
 <div class="sourceClojure">
 <div class="sourceCode" id="cb1"><pre class="sourceCode clojure code-with-copy"><code class="sourceCode clojure"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>(<span class="kw">ns</span> <span class="kw">index</span></span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>  (<span class="at">:require</span> [tablecloth.api <span class="at">:as</span> tc]))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>  (<span class="at">:require</span> [tablecloth.api <span class="at">:as</span> tc]</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>            [geo</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>             [geohash <span class="at">:as</span> geohash]</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>             [jts <span class="at">:as</span> jts]</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>             [spatial <span class="at">:as</span> spatial]</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>             [io <span class="at">:as</span> geoio]</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>             [crs <span class="at">:as</span> crs]]</span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>            [scicloj.noj.v1.vis.hanami <span class="at">:as</span> hanami]</span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>            [aerial.hanami.templates <span class="at">:as</span> ht])</span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>  (<span class="at">:import</span> (org.locationtech.jts.<span class="kw">index</span>.strtree STRtree)</span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>           (org.locationtech.jts.geom Geometry Point Polygon Coordinate)</span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>           (org.locationtech.jts.geom.prep PreparedGeometry</span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>                                           PreparedLineString</span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>                                           PreparedPolygon</span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a>                                           PreparedGeometryFactory)</span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a>           (java.util TreeMap)))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="sourceClojure">
-<div class="sourceCode" id="cb2"><pre class="sourceCode clojure code-with-copy"><code class="sourceCode clojure"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>(<span class="bu">defonce</span><span class="fu"> stations</span></span>
+<div class="sourceCode" id="cb2"><pre class="sourceCode clojure code-with-copy"><code class="sourceCode clojure"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>(<span class="bu">defonce</span><span class="fu"> raw-stations</span></span>
 <span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  (tc/dataset <span class="st">"data/stations20230530.csv.gz"</span></span>
 <span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>              {<span class="at">:key-fn</span> <span class="kw">keyword</span></span>
 <span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>               <span class="at">:separator</span> <span class="st">"|"</span>}))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="sourceClojure">
-<div class="sourceCode" id="cb3"><pre class="sourceCode clojure code-with-copy"><code class="sourceCode clojure"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>(tc/shape stations)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode" id="cb3"><pre class="sourceCode clojure code-with-copy"><code class="sourceCode clojure"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>(tc/shape raw-stations)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="printedClojure">
 <div class="sourceCode" id="cb4"><pre class="sourceCode clojure code-with-copy"><code class="sourceCode clojure"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>[<span class="dv">32248</span> <span class="dv">11</span>]</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="sourceClojure">
-<div class="sourceCode" id="cb5"><pre class="sourceCode clojure code-with-copy"><code class="sourceCode clojure"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>(<span class="kw">-&gt;</span> stations</span>
+<div class="sourceCode" id="cb5"><pre class="sourceCode clojure code-with-copy"><code class="sourceCode clojure"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>(<span class="kw">-&gt;</span> raw-stations</span>
 <span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>    (tc/rows <span class="at">:as-maps</span>)</span>
 <span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">first</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
@@ -143,6 +161,76 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a> <span class="at">:Neighborhood</span> <span class="st">"רהט"</span>,</span>
 <span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a> <span class="at">:YishuvSta</span> <span class="fl">1.1610032E7</span>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
+<div class="sourceClojure">
+<div class="sourceCode" id="cb7"><pre class="sourceCode clojure code-with-copy"><code class="sourceCode clojure"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>(<span class="bu">def</span><span class="fu"> WGS84 </span>(geo.crs/create-crs <span class="dv">4326</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>https://epsg.io/?q=Israel</p>
+<div class="sourceClojure">
+<div class="sourceCode" id="cb8"><pre class="sourceCode clojure code-with-copy"><code class="sourceCode clojure"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>(<span class="bu">def</span><span class="fu"> Israel1993 </span>(geo.crs/create-crs <span class="dv">2039</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div class="sourceClojure">
+<div class="sourceCode" id="cb9"><pre class="sourceCode clojure code-with-copy"><code class="sourceCode clojure"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>(<span class="bu">def</span><span class="fu"> crs-transform-Israel1993-&gt;WGS84</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>  (geo.crs/create-transform Israel1993 WGS84))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div class="sourceClojure">
+<div class="sourceCode" id="cb10"><pre class="sourceCode clojure code-with-copy"><code class="sourceCode clojure"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>(<span class="bu">def</span><span class="fu"> crs-transform-WGS84-&gt;Israel1993</span></span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>  (geo.crs/create-transform WGS84 Israel1993))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div class="sourceClojure">
+<div class="sourceCode" id="cb11"><pre class="sourceCode clojure code-with-copy"><code class="sourceCode clojure"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>(<span class="bu">defn</span><span class="fu"> Israel1993-&gt;WGS84 </span>[geometry]</span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>  (geo.jts/transform-geom geometry crs-transform-Israel1993-&gt;WGS84))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div class="sourceClojure">
+<div class="sourceCode" id="cb12"><pre class="sourceCode clojure code-with-copy"><code class="sourceCode clojure"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a>(<span class="bu">defn</span><span class="fu"> WGS84-&gt;Israel1993 </span>[geometry]</span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>  (geo.jts/transform-geom geometry crs-transform-WGS84-&gt;Israel1993))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div class="sourceClojure">
+<div class="sourceCode" id="cb13"><pre class="sourceCode clojure code-with-copy"><code class="sourceCode clojure"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>(<span class="bu">defn</span><span class="fu"> yx-&gt;point </span>[y x]</span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>  (jts/point (jts/coordinate y x)))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div class="sourceClojure">
+<div class="sourceCode" id="cb14"><pre class="sourceCode clojure code-with-copy"><code class="sourceCode clojure"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a>(<span class="bu">defn</span><span class="fu"> point-&gt;yx </span>[^Point point]</span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>  (<span class="kw">let</span> [c (.getCoordinate point)]</span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>    [(.getY c)</span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>     (.getX c)]))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div class="sourceClojure">
+<div class="sourceCode" id="cb15"><pre class="sourceCode clojure code-with-copy"><code class="sourceCode clojure"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a>(<span class="bu">def</span><span class="fu"> processed-stations</span></span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>  (<span class="kw">-&gt;</span> raw-stations</span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>      (tc/map-columns <span class="at">:WGS84</span> [<span class="at">:Long</span> <span class="at">:Lat</span>] yx-&gt;point)</span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>      (tc/map-columns <span class="at">:Israel1993</span> [<span class="at">:WGS84</span>] WGS84-&gt;Israel1993)</span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a>      (tc/map-columns <span class="at">:yx</span> [<span class="at">:Israel1993</span>] point-&gt;yx)</span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a>      (tc/map-columns <span class="at">:y</span> [<span class="at">:yx</span>] <span class="kw">first</span>)</span>
+<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a>      (tc/map-columns <span class="at">:x</span> [<span class="at">:yx</span>] <span class="kw">second</span>)))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div class="sourceClojure">
+<div class="sourceCode" id="cb16"><pre class="sourceCode clojure code-with-copy"><code class="sourceCode clojure"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a>(<span class="bu">defn</span><span class="fu"> as-geo </span>[vega-lite-spec]</span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>  (<span class="kw">-&gt;</span> vega-lite-spec</span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>      (<span class="kw">update</span> <span class="at">:encoding</span> update-keys</span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>              #(<span class="kw">case</span> <span class="va">%</span></span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>                 <span class="at">:x</span> <span class="at">:latitude</span></span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>                 <span class="at">:y</span> <span class="at">:longitude</span></span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a>                 <span class="at">:x2</span> <span class="at">:latitude2</span></span>
+<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a>                 <span class="at">:y2</span> <span class="at">:longitude2</span></span>
+<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a>                 <span class="va">%</span>))</span>
+<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a>      (<span class="kw">assoc</span> <span class="at">:projection</span> {<span class="at">:type</span> <span class="at">:mercator</span>})))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<p>Tel Aviv: 32.109333 34.855499</p>
+<div class="sourceClojure">
+<div class="sourceCode" id="cb17"><pre class="sourceCode clojure code-with-copy"><code class="sourceCode clojure"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a>(<span class="kw">-&gt;</span> processed-stations</span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>    (tc/select-columns [<span class="at">:CityName</span> <span class="at">:Neighborhood</span> <span class="at">:Lat</span> <span class="at">:Long</span>])</span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>    (tc/select-rows (<span class="kw">fn</span> [{<span class="at">:keys</span> [Lat Long]}]</span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>                      (<span class="kw">and</span> (<span class="kw">&lt;</span> <span class="fl">31.9</span> Lat <span class="fl">32.2</span>)</span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>                           (<span class="kw">&lt;</span> <span class="fl">34.7</span> Long <span class="fl">35.1</span>))))</span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a>    (hanami/plot ht/point-chart</span>
+<span id="cb17-7"><a href="#cb17-7" aria-hidden="true" tabindex="-1"></a>                 {<span class="at">:X</span> <span class="at">:Lat</span></span>
+<span id="cb17-8"><a href="#cb17-8" aria-hidden="true" tabindex="-1"></a>                  <span class="at">:Y</span> <span class="at">:Long</span></span>
+<span id="cb17-9"><a href="#cb17-9" aria-hidden="true" tabindex="-1"></a>                  <span class="at">:OPACITY</span> <span class="fl">0.5</span>})</span>
+<span id="cb17-10"><a href="#cb17-10" aria-hidden="true" tabindex="-1"></a>    as-geo</span>
+<span id="cb17-11"><a href="#cb17-11" aria-hidden="true" tabindex="-1"></a>    (<span class="kw">assoc-in</span> [<span class="at">:mark</span> <span class="at">:tooltip</span>]</span>
+<span id="cb17-12"><a href="#cb17-12" aria-hidden="true" tabindex="-1"></a>              {<span class="at">:content</span> <span class="st">"data"</span>}))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div><script>vegaEmbed(document.currentScript.parentElement, {"encoding":{"longitude":{"field":"Long","type":"quantitative"},"opacity":{"value":0.5},"latitude":{"field":"Lat","type":"quantitative"}},"usermeta":{"embedOptions":{"renderer":"svg"}},"mark":{"type":"circle","tooltip":{"content":"data"}},"width":400,"background":"floralwhite","projection":{"type":"mercator"},"height":300,"data":{"url":"index_files\/0.csv","format":{"type":"csv"}}});</script></div>
 <div style="background-color:grey;height:2px;width:100%;"></div>
 <div><pre><small><small>source: <a href="https://github.com/daslu/stations-analysis/blob/main/notebooks/index.clj">notebooks/index.clj</a></small></small></pre></div>
 
