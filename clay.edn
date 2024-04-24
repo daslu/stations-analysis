@@ -1,0 +1,5 @@
+{:remote-repo {:git-url "https://github.com/daslu/stations-analysis"
+               :branch "main"}
+ :quarto {:format {:html {:theme [:cosmo "notebooks/custom.scss"]}}
+          :title "Stations analysis"}
+ :base-target-path "temp"}
