@@ -1,4 +1,4 @@
-(ns gtfs
+(ns gtfs-demo
   (:require [tablecloth.api :as tc]
             [scicloj.noj.v1.vis.hanami :as hanami]
             [scicloj.noj.v1.vis.stats :as vis.stats]
