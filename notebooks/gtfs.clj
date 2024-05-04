@@ -119,21 +119,11 @@
                                                                                .-style))))}))
                           (.addTo m))))}])
       {:provider "OpenStreetMap.Mapnik"
-       :center   [60.192059 24.945831] ; Helsinki-center
+       :center   [31.771959 35.217018] ; Israel-center
        :geojson geojson}]
      {:reagent/deps [:leaflet]})))
 
 
-(leaflet-map {:type :FeatureCollection
-              :features [{:type :Feature
-                          :geometry {:type :Point
-                                     :coordinates [24.945831 60.192059]}
-                          :properties {:style {:radius 1000
-                                               :fillColor "purple"
-                                               :color "black"
-                                               :weight 1
-                                               :opacity 1
-                                               :fillOpacity 0.8}}}]})
 
 
 (leaflet-map {:type :FeatureCollection
