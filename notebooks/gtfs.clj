@@ -18,6 +18,21 @@
       (str "stops.csv.gz")
       (tc/dataset {:key-fn keyword})))
 
+(-> stops
+    (tc/rows :as-maps)
+    (->> (take 9)))
+
+(def selected-stops
+  (-> stops
+      (tc/select-rows
+       #(and (< 31.9 (:stop_lat %) 32.2)
+             (< 34.6 (:stop_lon %) 34.9)))))
+
+(def selected-stop-ids
+  (-> selected-stops
+      :stop_id
+      set))
+
 (defonce stop-times
   (-> base-path
       (str "stop_times.csv.gz")
@@ -25,6 +40,8 @@
 
 (def edges
   (-> stop-times
+      (tc/select-rows
+       #(-> % :stop_id selected-stop-ids))
       (tc/group-by [:trip_id] {:result-type :as-seq})
       (->> (mapcat (fn [{:keys [stop_id]}]
                      (map (comp sort vector)
@@ -34,7 +51,7 @@
       distinct))
 
 (def vertices
-  (->> stops
+  (->> selected-stops
        :stop_id
        distinct
        sort))
@@ -53,7 +70,8 @@
 (def betweeness
   (->> (BetweennessCentrality. graph true)
        .getScores
-       (into {})))
+       (into {})
+       time))
 
 
 (def scored-stops
@@ -103,7 +121,7 @@
                     (let [m (-> js/L
                                 (.map el)
                                 (.setView (clj->js center)
-                                          11))]
+                                          10))]
                       (-> js/L
                           .-tileLayer
                           (.provider provider)
@@ -119,7 +137,7 @@
                                                                                .-style))))}))
                           (.addTo m))))}])
       {:provider "OpenStreetMap.Mapnik"
-       :center   [31.771959 35.217018] ; Israel-center
+       :center   [32 34.8]
        :geojson geojson}]
      {:reagent/deps [:leaflet]})))
 
@@ -128,8 +146,11 @@
 
 (leaflet-map {:type :FeatureCollection
               :features (-> scored-stops
+                            (tc/select-rows
+                             #(and (< 31.9 (:stop_lat %) 32.2)
+                                   (< 34.6 (:stop_lon %) 34.9)))
                             (tc/rows :as-maps)
-                            (->> (mapv (fn [{:keys [stop_lat stop_lon betweeness]}]
+                            (->> (mapv (fn [{:keys [stop_name stop_lat stop_lon betweeness]}]
                                          (let [radius (if (> betweeness 0.001)
                                                         200
                                                         100)
@@ -144,4 +165,5 @@
                                                                  :color color
                                                                  :weight 1
                                                                  :opacity 1
-                                                                 :fillOpacity 0.1}}})))))})
+                                                                 :fillOpacity 0.1}
+                                                         :label stop_name}})))))})
