@@ -4,7 +4,8 @@
             [scicloj.noj.v1.vis.stats :as vis.stats]
             [aerial.hanami.templates :as ht]
             [clojure2d.color :as color]
-            [scicloj.kindly.v4.kind :as kind])
+            [scicloj.kindly.v4.kind :as kind]
+            [fastmath.clustering :as clustering])
   (:import (org.jgrapht.graph SimpleGraph AsUndirectedGraph DefaultEdge)
            (org.jgrapht.alg.scoring BetweennessCentrality)))
 
@@ -75,7 +76,7 @@
 
 
 (def scored-stops
-  (-> stops
+  (-> selected-stops
       (tc/map-columns :betweeness [:stop_id] betweeness)
       (tc/log :log-betweeness :betweeness)))
 
@@ -135,6 +136,11 @@
                                                                            (-> feature
                                                                                .-properties
                                                                                .-style))))}))
+                          (.bindTooltip (fn [layer]
+                                          (-> layer
+                                              .-feature
+                                              .-properties
+                                              .-tooltip)))
                           (.addTo m))))}])
       {:provider "OpenStreetMap.Mapnik"
        :center   [32 34.8]
@@ -146,9 +152,6 @@
 
 (leaflet-map {:type :FeatureCollection
               :features (-> scored-stops
-                            (tc/select-rows
-                             #(and (< 31.9 (:stop_lat %) 32.2)
-                                   (< 34.6 (:stop_lon %) 34.9)))
                             (tc/rows :as-maps)
                             (->> (mapv (fn [{:keys [stop_name stop_lat stop_lon betweeness]}]
                                          (let [radius (if (> betweeness 0.001)
@@ -166,4 +169,4 @@
                                                                  :weight 1
                                                                  :opacity 1
                                                                  :fillOpacity 0.1}
-                                                         :label stop_name}})))))})
+                                                         :tooltip stop_name}})))))})
