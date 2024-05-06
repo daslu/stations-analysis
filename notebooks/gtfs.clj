@@ -5,9 +5,21 @@
             [aerial.hanami.templates :as ht]
             [clojure2d.color :as color]
             [scicloj.kindly.v4.kind :as kind]
-            [fastmath.clustering :as clustering])
+            [fastmath.clustering :as clustering]
+            [geo
+             [geohash :as geohash]
+             [jts :as jts]
+             [spatial :as spatial]
+             [io :as geoio]
+             [crs :as crs]])
   (:import (org.jgrapht.graph SimpleGraph AsUndirectedGraph DefaultEdge)
-           (org.jgrapht.alg.scoring BetweennessCentrality)))
+           (org.jgrapht.alg.scoring BetweennessCentrality)
+           (org.locationtech.jts.index.strtree STRtree)
+           (org.locationtech.jts.geom Geometry Point Polygon Coordinate)
+           (org.locationtech.jts.geom.prep PreparedGeometry
+                                           PreparedLineString
+                                           PreparedPolygon
+                                           PreparedGeometryFactory)))
 
 (set! *warn-on-reflection* true)
 
@@ -23,8 +35,43 @@
     (tc/rows :as-maps)
     (->> (take 9)))
 
-(def selected-stops
+
+
+(def WGS84 (geo.crs/create-crs 4326))
+;; https://epsg.io/?q=Israel
+(def Israel1993 (geo.crs/create-crs 2039))
+
+(def crs-transform-Israel1993->WGS84
+  (geo.crs/create-transform Israel1993 WGS84))
+
+(def crs-transform-WGS84->Israel1993
+  (geo.crs/create-transform WGS84 Israel1993))
+
+(defn Israel1993->WGS84 [geometry]
+  (geo.jts/transform-geom geometry crs-transform-Israel1993->WGS84))
+
+(defn WGS84->Israel1993 [geometry]
+  (geo.jts/transform-geom geometry crs-transform-WGS84->Israel1993))
+
+(defn yx->point [y x]
+  (jts/point (jts/coordinate y x)))
+
+(defn point->yx [^Point point]
+  (let [c (.getCoordinate point)]
+    [(.getY c)
+     (.getX c)]))
+
+(def stops-with-xy
   (-> stops
+      (tc/map-columns :WGS84 [:stop_lon :stop_lat] yx->point)
+      (tc/map-columns :Israel1993 [:WGS84] WGS84->Israel1993)
+      (tc/map-columns :yx [:Israel1993] point->yx)
+      (tc/map-columns :y [:yx] first)
+      (tc/map-columns :x [:yx] second)))
+
+
+(def selected-stops
+  (-> stops-with-xy
       (tc/select-rows
        #(and (< 31.9 (:stop_lat %) 32.2)
              (< 34.6 (:stop_lon %) 34.9)))))
@@ -34,10 +81,13 @@
       :stop_id
       set))
 
+
+
 (defonce stop-times
   (-> base-path
       (str "stop_times.csv.gz")
       (tc/dataset {:key-fn keyword})))
+
 
 (def edges
   (-> stop-times
