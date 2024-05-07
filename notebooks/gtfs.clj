@@ -23,18 +23,6 @@
 
 (set! *warn-on-reflection* true)
 
-(def base-path
-  "data/gtfs-static/public-transportation/")
-
-(defonce stops
-  (-> base-path
-      (str "stops.csv.gz")
-      (tc/dataset {:key-fn keyword})))
-
-(-> stops
-    (tc/rows :as-maps)
-    (->> (take 9)))
-
 
 
 (def WGS84 (geo.crs/create-crs 4326))
@@ -61,13 +49,73 @@
     [(.getY c)
      (.getX c)]))
 
+
+
+(defn slurp-gzip
+  "Read a gzipped file into a string"
+  [path]
+  (with-open [in (java.util.zip.GZIPInputStream. (clojure.java.io/input-stream path))]
+    (slurp in)))
+
+
+(defonce statistical-areas
+  (-> "data/statistical_areas/statistical_areas_2022.geojson.gz"
+      slurp-gzip
+      geoio/read-geojson))
+
+(def statistical-areas-with-xy
+  (->> statistical-areas
+       (map #(update % :geometry WGS84->Israel1993))))
+
+
+(defn make-spatial-index [rows]
+  (let [tree (org.locationtech.jts.index.strtree.STRtree.)]
+    (doseq [{:keys [geometry]
+             :as row} rows]
+      (.insert tree
+               (.getEnvelopeInternal geometry)
+               (assoc row
+                      :prepared-geometry
+                      (org.locationtech.jts.geom.prep.PreparedGeometryFactory/prepare geometry))))
+    tree))
+
+
+(def statistical-areas-index
+  (make-spatial-index statistical-areas-with-xy))
+
+(defn yx->statistical-areas [yx]
+  (let [point (apply yx->point (reverse yx))]
+    (.query statistical-areas-index (.getEnvelopeInternal (.buffer point 1)))))
+
+(defn yx->yishuv [yx]
+  (->> yx
+       yx->statistical-areas
+       (map (comp (juxt :SEMEL_YISHUV :SHEM_YISHUV) :properties))
+       set))
+
+
+(def base-path
+  "data/gtfs-static/public-transportation/")
+
+(defonce stops
+  (-> base-path
+      (str "stops.csv.gz")
+      (tc/dataset {:key-fn keyword})))
+
+(-> stops
+    (tc/rows :as-maps)
+    (->> (take 9)))
+
+
 (def stops-with-xy
   (-> stops
       (tc/map-columns :WGS84 [:stop_lon :stop_lat] yx->point)
       (tc/map-columns :Israel1993 [:WGS84] WGS84->Israel1993)
       (tc/map-columns :yx [:Israel1993] point->yx)
       (tc/map-columns :y [:yx] first)
-      (tc/map-columns :x [:yx] second)))
+      (tc/map-columns :x [:yx] second)
+      (tc/map-columns :yishuv [:yx] yx->yishuv)))
+
 
 
 (def selected-stops
@@ -151,6 +199,7 @@
        .getScores
        (into {})
        time))
+
 
 
 (def scored-stops
