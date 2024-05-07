@@ -69,8 +69,8 @@
 
 
 (defn make-spatial-index [rows]
-  (let [tree (org.locationtech.jts.index.strtree.STRtree.)]
-    (doseq [{:keys [geometry]
+  (let [tree (STRtree.)]
+    (doseq [{:keys [^Geometry geometry]
              :as row} rows]
       (.insert tree
                (.getEnvelopeInternal geometry)
@@ -84,8 +84,8 @@
   (make-spatial-index statistical-areas-with-xy))
 
 (defn yx->statistical-areas [yx]
-  (let [point (apply yx->point (reverse yx))]
-    (.query statistical-areas-index (.getEnvelopeInternal (.buffer point 1)))))
+  (let [^Point point (apply yx->point (reverse yx))]
+    (.query ^STRtree statistical-areas-index (.getEnvelopeInternal (.buffer point 1)))))
 
 (defn yx->yishuv [yx]
   (->> yx
@@ -107,7 +107,7 @@
     (->> (take 9)))
 
 
-(def stops-with-xy
+(def stops-with-location
   (-> stops
       (tc/map-columns :WGS84 [:stop_lon :stop_lat] yx->point)
       (tc/map-columns :Israel1993 [:WGS84] WGS84->Israel1993)
@@ -116,13 +116,20 @@
       (tc/map-columns :x [:yx] second)
       (tc/map-columns :yishuv [:yx] yx->yishuv)))
 
-
-
 (def selected-stops
-  (-> stops-with-xy
-      (tc/select-rows
-       #(and (< 31.9 (:stop_lat %) 32.2)
-             (< 34.6 (:stop_lon %) 34.9)))))
+  (-> stops-with-location
+      (tc/select-rows (fn [{:keys [yishuv]}]
+                        (->> yishuv
+                             (map first)
+                             (some #{681
+                                     2400
+                                     2520
+                                     5000
+                                     6100
+                                     6200
+                                     8600
+                                     7900
+                                     9400}))))))
 
 (def selected-stop-ids
   (-> selected-stops
