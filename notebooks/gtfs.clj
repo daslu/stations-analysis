@@ -6,6 +6,7 @@
             [clojure2d.color :as color]
             [scicloj.kindly.v4.kind :as kind]
             [fastmath.clustering :as clustering]
+            [fastmath.core :as fastmath]
             [geo
              [geohash :as geohash]
              [jts :as jts]
@@ -20,6 +21,8 @@
                                            PreparedLineString
                                            PreparedPolygon
                                            PreparedGeometryFactory)))
+
+
 
 (set! *warn-on-reflection* true)
 
@@ -149,8 +152,43 @@
 
 
 
+#_(defn cartesian-product [values]
+    (for [v0 values
+          v1 values
+          :when (< v0 v1)]
+      [v0 v1]))
 
 
+
+#_(-> relevant-stops
+      (tc/add-column :cluster (fn [stops]
+                                (-> stops
+                                    (tc/select-columns [:x :y])
+                                    tc/rows
+                                    (clustering/dbscan 1 200)
+                                    :clustering)))
+      (tc/drop-rows #(-> % :cluster (= 2147483647)))
+      (tc/group-by [:cluster] {:result-type :as-seq})
+      (->> (mapcat (fn [cluster-stops]
+                     (-> cluster-stops
+                         :stop_id
+                         cartesian-product)))))
+
+
+(defn distance-based-edges [radius]
+  (let [rows (-> relevant-stops
+                 (tc/rows :as-maps))]
+    (->> rows
+         (mapcat (fn [row0]
+                   (->> rows
+                        (filter (fn [row1]
+                                  (and
+                                   (not= row0 row1)
+                                   (< (fastmath/dist (:yx row0)
+                                                     (:yx row1)) radius))))
+                        (map (fn [row1]
+                               [(:stop_id row0)
+                                (:stop_id row1)]))))))))
 
 
 
@@ -162,7 +200,10 @@
                           stop_id
                           (rest stop_id))))
            (filter (partial apply not=)))
-      distinct))
+      (concat (distance-based-edges 250))
+      distinct
+      vec
+      time))
 
 (def vertices
   (->> relevant-stops
