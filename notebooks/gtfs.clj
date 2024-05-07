@@ -82,17 +82,18 @@
       set))
 
 
-
 (defonce stop-times
   (-> base-path
       (str "stop_times.csv.gz")
       (tc/dataset {:key-fn keyword})))
 
-
-(def edges
+(def selected-stop-times
   (-> stop-times
       (tc/select-rows
-       #(-> % :stop_id selected-stop-ids))
+       #(-> % :stop_id selected-stop-ids))))
+
+(def edges
+  (-> selected-stop-times
       (tc/group-by [:trip_id] {:result-type :as-seq})
       (->> (mapcat (fn [{:keys [stop_id]}]
                      (map (comp sort vector)
@@ -109,6 +110,33 @@
 
 (count edges)
 (count vertices)
+
+
+(def selected-stops-lat-lon
+  (-> selected-stops
+      (tc/select-columns [:stop_id :stop_lat :stop_lon])
+      (tc/set-dataset-name nil)))
+
+(def selectesd-stop-times-lat-lon
+  (-> selected-stop-times
+      (tc/left-join selected-stops-lat-lon [:stop_id])))
+
+(def edges-lat-lon
+  (-> edges
+      (->> (map (fn [[v0 v1]]
+                  {:v0 v0
+                   :v1 v1})))
+      tc/dataset
+      (tc/left-join selected-stops-lat-lon {:left :v0 :right :stop_id})
+      (tc/left-join selected-stops-lat-lon {:left :v1 :right :stop_id})
+      (tc/select-columns [:stop_lat :stop_lon
+                          :.stop_lat :.stop_lon])
+      (tc/rename-columns {:stop_lat :stop_lat0
+                          :stop_lon :stop_lon0
+                          :.stop_lat :stop_lat1
+                          :.stop_lon :stop_lon1})))
+
+
 
 (def graph
   (let [g (SimpleGraph. DefaultEdge)]
@@ -160,63 +188,71 @@
     as-geo)
 
 (defn leaflet-map [geojson]
-  (delay
-    (kind/reagent
-     ['(fn [{:keys [provider
-                    center
-                    geojson]}]
-         (.log js/console geojson)
-         [:div
-          {:style {:height "900px"}
-           :ref   (fn [el]
-                    (let [m (-> js/L
-                                (.map el)
-                                (.setView (clj->js center)
-                                          10))]
-                      (-> js/L
-                          .-tileLayer
-                          (.provider provider)
-                          (.addTo m))
-                      (-> js/L
-                          (.geoJson (clj->js geojson)
-                                    ;; https://gist.github.com/geog4046instructor/ac36ea8f317912f51f0bb1d50b5c3481
-                                    (clj->js {:pointToLayer (fn [feature latlng]
-                                                              (-> js/L
-                                                                  (.circle latlng
-                                                                           (-> feature
-                                                                               .-properties
-                                                                               .-style))))}))
-                          (.bindTooltip (fn [layer]
-                                          (-> layer
-                                              .-feature
-                                              .-properties
-                                              .-tooltip)))
-                          (.addTo m))))}])
-      {:provider "OpenStreetMap.Mapnik"
-       :center   [32 34.8]
-       :geojson geojson}]
-     {:reagent/deps [:leaflet]})))
+  (kind/reagent
+   ['(fn [{:keys [provider
+                  center
+                  geojson]}]
+       (.log js/console geojson)
+       [:div
+        {:style {:height "900px"}
+         :ref   (fn [el]
+                  (let [m (-> js/L
+                              (.map el)
+                              (.setView (clj->js center)
+                                        10))]
+                    (-> js/L
+                        .-tileLayer
+                        (.provider provider)
+                        (.addTo m))
+                    (-> js/L
+                        (.geoJson (clj->js geojson)
+                                  ;; https://gist.github.com/geog4046instructor/ac36ea8f317912f51f0bb1d50b5c3481
+                                  (clj->js {:pointToLayer (fn [feature latlng]
+                                                            (-> js/L
+                                                                (.circle latlng
+                                                                         (-> feature
+                                                                             .-properties
+                                                                             .-style))))
+                                            :style {:opacity 0.5}}))
+                        (.bindTooltip (fn [layer]
+                                        (-> layer
+                                            .-feature
+                                            .-properties
+                                            .-tooltip)))
+                        (.addTo m))))}])
+    {:provider "OpenStreetMap.Mapnik"
+     :center   [32 34.8]
+     :geojson geojson}]
+   {:reagent/deps [:leaflet]}))
 
 
 
 
 (leaflet-map {:type :FeatureCollection
-              :features (-> scored-stops
-                            (tc/rows :as-maps)
-                            (->> (mapv (fn [{:keys [stop_name stop_lat stop_lon betweeness]}]
-                                         (let [radius (if (> betweeness 0.001)
-                                                        200
-                                                        100)
-                                               color (if (> betweeness 0.001)
-                                                       "purple"
-                                                       "darkgreen")]
-                                           {:type :Feature
-                                            :geometry {:type :Point
-                                                       :coordinates [stop_lon stop_lat]}
-                                            :properties {:style {:radius radius
-                                                                 :fillColor color
-                                                                 :color color
-                                                                 :weight 1
-                                                                 :opacity 1
-                                                                 :fillOpacity 0.1}
-                                                         :tooltip stop_name}})))))})
+              :features (vec
+                         (concat (-> edges-lat-lon
+                                     (tc/rows :as-maps)
+                                     (->> (mapv (fn [{:keys [stop_lat0 stop_lon0 stop_lat1 stop_lon1]}]
+                                                  {:type :Feature
+                                                   :geometry {:type :LineString
+                                                              :coordinates [[stop_lon0 stop_lat0]
+                                                                            [stop_lon1 stop_lat1]]}}))))
+                                 (-> scored-stops
+                                     (tc/rows :as-maps)
+                                     (->> (mapv (fn [{:keys [stop_name stop_lat stop_lon betweeness]}]
+                                                  (let [radius (if (> betweeness 0.002)
+                                                                 50
+                                                                 20)
+                                                        color (if (> betweeness 0.002)
+                                                                "brown"
+                                                                "darkgreen")]
+                                                    {:type :Feature
+                                                     :geometry {:type :Point
+                                                                :coordinates [stop_lon stop_lat]}
+                                                     :properties {:style {:radius radius
+                                                                          :fillColor color
+                                                                          :color color
+                                                                          :weight 1
+                                                                          :opacity 1
+                                                                          :fillOpacity 0.5}
+                                                                  :tooltip (str stop_name " " (format "%.02f%%" (* 100 betweeness)))}})))))))})
