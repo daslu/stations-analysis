@@ -276,7 +276,7 @@
                                             .-properties
                                             .-tooltip)))
                         (.addTo m))))}])
-    {:provider "OpenStreetMap.Mapnik"
+    {:provider "Stadia.AlidadeSmoothDark"
      :center   [32 34.8]
      :geojson geojson}]
    {:reagent/deps [:leaflet]}))
@@ -302,8 +302,8 @@
                                                        50
                                                        20)
                                               color (if (> betweeness 0.002)
-                                                      "brown"
-                                                      "darkgreen")]
+                                                      "yellow"
+                                                      "cyan")]
                                           {:type :Feature
                                            :geometry {:type :Point
                                                       :coordinates [stop_lon stop_lat]}
