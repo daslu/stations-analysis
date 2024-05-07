@@ -228,31 +228,33 @@
 
 
 
-(leaflet-map {:type :FeatureCollection
-              :features (vec
-                         (concat (-> edges-lat-lon
-                                     (tc/rows :as-maps)
-                                     (->> (mapv (fn [{:keys [stop_lat0 stop_lon0 stop_lat1 stop_lon1]}]
-                                                  {:type :Feature
-                                                   :geometry {:type :LineString
-                                                              :coordinates [[stop_lon0 stop_lat0]
-                                                                            [stop_lon1 stop_lat1]]}}))))
-                                 (-> scored-stops
-                                     (tc/rows :as-maps)
-                                     (->> (mapv (fn [{:keys [stop_name stop_lat stop_lon betweeness]}]
-                                                  (let [radius (if (> betweeness 0.002)
-                                                                 50
-                                                                 20)
-                                                        color (if (> betweeness 0.002)
-                                                                "brown"
-                                                                "darkgreen")]
-                                                    {:type :Feature
-                                                     :geometry {:type :Point
-                                                                :coordinates [stop_lon stop_lat]}
-                                                     :properties {:style {:radius radius
-                                                                          :fillColor color
-                                                                          :color color
-                                                                          :weight 1
-                                                                          :opacity 1
-                                                                          :fillOpacity 0.5}
-                                                                  :tooltip (str stop_name " " (format "%.02f%%" (* 100 betweeness)))}})))))))})
+(delay
+  (leaflet-map
+   {:type :FeatureCollection
+    :features (vec
+               (concat (-> edges-lat-lon
+                           (tc/rows :as-maps)
+                           (->> (mapv (fn [{:keys [stop_lat0 stop_lon0 stop_lat1 stop_lon1]}]
+                                        {:type :Feature
+                                         :geometry {:type :LineString
+                                                    :coordinates [[stop_lon0 stop_lat0]
+                                                                  [stop_lon1 stop_lat1]]}}))))
+                       (-> scored-stops
+                           (tc/rows :as-maps)
+                           (->> (mapv (fn [{:keys [stop_name stop_lat stop_lon betweeness]}]
+                                        (let [radius (if (> betweeness 0.002)
+                                                       50
+                                                       20)
+                                              color (if (> betweeness 0.002)
+                                                      "brown"
+                                                      "darkgreen")]
+                                          {:type :Feature
+                                           :geometry {:type :Point
+                                                      :coordinates [stop_lon stop_lat]}
+                                           :properties {:style {:radius radius
+                                                                :fillColor color
+                                                                :color color
+                                                                :weight 1
+                                                                :opacity 1
+                                                                :fillOpacity 0.5}
+                                                        :tooltip (str stop_name " " (format "%.02f%%" (* 100 betweeness)))}})))))))}))
