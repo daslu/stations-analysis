@@ -1,0 +1,246 @@
+
+---
+format:
+  html:
+    toc: true
+    toc-depth: 4
+    theme: [cosmo, notebooks/custom.scss]
+    output-file: index.html
+fontsize: 0.9em
+code-block-background: true
+include-in-header: {text: '<link rel = "icon" href = "data:," />'}
+title: Stations analysis
+
+---
+<style></style><style>.printedClojure .sourceCode {
+  background-color: transparent;
+  border-style: none;
+}
+</style><style>.clay-limit-image-width .clay-image {max-width: 100%}
+</style>
+<script src="index_files/md-default1.js" type="text/javascript"></script><script src="index_files/md-default2.js" type="text/javascript"></script><script src="index_files/vega3.js" type="text/javascript"></script><script src="index_files/vega4.js" type="text/javascript"></script><script src="index_files/vega5.js" type="text/javascript"></script>
+
+::: {.sourceClojure}
+```clojure
+(ns index
+  (:require [tablecloth.api :as tc]
+            [geo
+             [geohash :as geohash]
+             [jts :as jts]
+             [spatial :as spatial]
+             [io :as geoio]
+             [crs :as crs]]
+            [scicloj.noj.v1.vis.hanami :as hanami]
+            [aerial.hanami.templates :as ht]
+            [scicloj.clay.v2.api :as clay]
+            [scicloj.kindly.v4.kind :as kind])
+  (:import (org.locationtech.jts.index.strtree STRtree)
+           (org.locationtech.jts.geom Geometry Point Polygon Coordinate)
+           (org.locationtech.jts.geom.prep PreparedGeometry
+                                           PreparedLineString
+                                           PreparedPolygon
+                                           PreparedGeometryFactory)
+           (java.util TreeMap)))
+```
+:::
+
+
+
+::: {.sourceClojure}
+```clojure
+(defonce raw-stations
+  (tc/dataset "data/stations20230530.csv.gz"
+              {:key-fn keyword
+               :separator "|"}))
+```
+:::
+
+
+
+::: {.sourceClojure}
+```clojure
+(tc/shape raw-stations)
+```
+:::
+
+
+
+::: {.printedClojure}
+```clojure
+[32248 11]
+
+```
+:::
+
+
+
+::: {.sourceClojure}
+```clojure
+(-> raw-stations
+    (tc/rows :as-maps)
+    first)
+```
+:::
+
+
+
+::: {.printedClojure}
+```clojure
+{:StationId 12860,
+ :CityCode 1161,
+ :CityName "רהט",
+ :MetropolinCode 3,
+ :MetropolinName "באר שבע",
+ :StationTypeCode 1,
+ :StationTypeName "תחנה רגילה",
+ :Lat 31.386868,
+ :Long 34.746346,
+ :Neighborhood "רהט",
+ :YishuvSta 1.1610032E7}
+
+```
+:::
+
+
+
+::: {.sourceClojure}
+```clojure
+(def WGS84 (geo.crs/create-crs 4326))
+```
+:::
+
+
+https://epsg.io/?q=Israel
+
+
+::: {.sourceClojure}
+```clojure
+(def Israel1993 (geo.crs/create-crs 2039))
+```
+:::
+
+
+
+::: {.sourceClojure}
+```clojure
+(def crs-transform-Israel1993->WGS84
+  (geo.crs/create-transform Israel1993 WGS84))
+```
+:::
+
+
+
+::: {.sourceClojure}
+```clojure
+(def crs-transform-WGS84->Israel1993
+  (geo.crs/create-transform WGS84 Israel1993))
+```
+:::
+
+
+
+::: {.sourceClojure}
+```clojure
+(defn Israel1993->WGS84 [geometry]
+  (geo.jts/transform-geom geometry crs-transform-Israel1993->WGS84))
+```
+:::
+
+
+
+::: {.sourceClojure}
+```clojure
+(defn WGS84->Israel1993 [geometry]
+  (geo.jts/transform-geom geometry crs-transform-WGS84->Israel1993))
+```
+:::
+
+
+
+::: {.sourceClojure}
+```clojure
+(defn yx->point [y x]
+  (jts/point (jts/coordinate y x)))
+```
+:::
+
+
+
+::: {.sourceClojure}
+```clojure
+(defn point->yx [^Point point]
+  (let [c (.getCoordinate point)]
+    [(.getY c)
+     (.getX c)]))
+```
+:::
+
+
+
+::: {.sourceClojure}
+```clojure
+(def processed-stations
+  (-> raw-stations
+      (tc/map-columns :WGS84 [:Long :Lat] yx->point)
+      (tc/map-columns :Israel1993 [:WGS84] WGS84->Israel1993)
+      (tc/map-columns :yx [:Israel1993] point->yx)
+      (tc/map-columns :y [:yx] first)
+      (tc/map-columns :x [:yx] second)))
+```
+:::
+
+
+
+::: {.sourceClojure}
+```clojure
+(defn as-geo [vega-lite-spec]
+  (-> vega-lite-spec
+      (update :encoding update-keys
+              #(case %
+                 :x :latitude
+                 :y :longitude
+                 :x2 :latitude2
+                 :y2 :longitude2
+                 %))
+      (assoc :projection {:type :mercator})))
+```
+:::
+
+
+Tel Aviv: 32.109333 34.855499
+
+
+::: {.sourceClojure}
+```clojure
+(-> processed-stations
+    (tc/select-columns [:CityName :Neighborhood :Lat :Long])
+    (tc/select-rows (fn [{:keys [Lat Long]}]
+                      (and (< 31.9 Lat 32.2)
+                           (< 34.7 Long 35.1))))
+    (hanami/plot ht/point-chart
+                 {:X :Lat
+                  :Y :Long
+                  :OPACITY 0.5})
+    as-geo
+    (assoc-in [:mark :tooltip]
+              {:content "data"}))
+```
+:::
+
+
+
+```{=html}
+<div><script>vegaEmbed(document.currentScript.parentElement, {"encoding":{"longitude":{"field":"Long","type":"quantitative"},"opacity":{"value":0.5},"latitude":{"field":"Lat","type":"quantitative"}},"usermeta":{"embedOptions":{"renderer":"svg"}},"mark":{"type":"circle","tooltip":{"content":"data"}},"width":400,"background":"floralwhite","projection":{"type":"mercator"},"height":300,"data":{"url":"index_files\/0.csv","format":{"type":"csv"}}});</script></div>
+```
+
+
+
+```{=html}
+<div style="background-color:grey;height:2px;width:100%;"></div>
+```
+
+
+
+```{=html}
+<div><pre><small><small>source: <a href="https://github.com/daslu/stations-analysis/blob/main/notebooks/index.clj">notebooks/index.clj</a></small></small></pre></div>
+```
