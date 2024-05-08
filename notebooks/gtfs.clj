@@ -18,12 +18,14 @@
             [clojure.java.io :as io])
   (:import (org.jgrapht.graph SimpleGraph AsUndirectedGraph DefaultEdge)
            (org.jgrapht.alg.scoring BetweennessCentrality)
+           org.jgrapht.alg.shortestpath.DijkstraShortestPath
            (org.locationtech.jts.index.strtree STRtree)
            (org.locationtech.jts.geom Geometry Point Polygon Coordinate)
            (org.locationtech.jts.geom.prep PreparedGeometry
                                            PreparedLineString
                                            PreparedPolygon
-                                           PreparedGeometryFactory)))
+                                           PreparedGeometryFactory)
+           org.jgrapht.alg.util.Pair))
 
 
 
@@ -143,6 +145,7 @@
                                        :geometry
                                        :coordinates
                                        first)})))
+       (filter :line)
        tc/dataset))
 
 (def nta-name->stop
@@ -156,6 +159,11 @@
   (map (comp sort vector)
        s
        (rest s)))
+
+(defn seq->double-pairs [s]
+  (->> s
+       seq->pairs
+       (mapcat (juxt identity reverse))))
 
 #_(-> nta-stops
       (tc/select-rows #(-> % :line (= "red")))
@@ -243,8 +251,7 @@
          "red - אם המושבות"
          "red - קרית אריה"]]
        (map (partial map nta-name->stop))
-       (mapcat seq->pairs)))
-
+       (mapcat seq->double-pairs)))
 
 (def base-path
   "data/gtfs-static/public-transportation/")
@@ -316,7 +323,8 @@
                                                      (:yx row1)) radius))))
                         (map (fn [row1]
                                [(:stop_id row0)
-                                (:stop_id row1)]))))))))
+                                (:stop_id row1)])))))
+         (mapcat (juxt identity reverse)))))
 
 
 
@@ -380,12 +388,24 @@
       (.addEdge g v0 v1))
     g))
 
+
+(def shortest-paths
+  (DijkstraShortestPath. graph))
+
+
+(-> shortest-paths
+    (.getPaths 83)
+    (.getDistanceAndPredecessorMap)
+    (->> (into {}))
+    (update-vals (fn [^Pair pair]
+                   (.getFirst pair))))
+
+
 (def betweeness
   (->> (BetweennessCentrality. graph true)
        .getScores
        (into {})
        time))
-
 
 
 (def scored-stops
@@ -493,7 +513,8 @@
                                                             " "
                                                             (format "%.02f%%" (* 100 betweeness)))}})))))
              (-> edges-details
-                 (tc/select-rows #(-> % :stop_id0 (> 1000000))) ; nta
+                 (tc/select-rows #(and (-> % :stop_id0 (> 1000000))
+                                       (-> % :stop_id1 (> 1000000)))) ; nta
                  (tc/rows :as-maps)
                  (->> (mapv (fn [{:keys [stop_lat0 stop_lon0 stop_lat1 stop_lon1]}]
                               {:type :Feature
