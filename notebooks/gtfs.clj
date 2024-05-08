@@ -1,5 +1,6 @@
 (ns gtfs
   (:require [tablecloth.api :as tc]
+            [tablecloth.column.api :as tcc]
             [scicloj.noj.v1.vis.hanami :as hanami]
             [scicloj.noj.v1.vis.stats :as vis.stats]
             [aerial.hanami.templates :as ht]
@@ -7,12 +8,14 @@
             [scicloj.kindly.v4.kind :as kind]
             [fastmath.clustering :as clustering]
             [fastmath.core :as fastmath]
+            [charred.api :as charred]
             [geo
              [geohash :as geohash]
              [jts :as jts]
              [spatial :as spatial]
              [io :as geoio]
-             [crs :as crs]])
+             [crs :as crs]]
+            [clojure.java.io :as io])
   (:import (org.jgrapht.graph SimpleGraph AsUndirectedGraph DefaultEdge)
            (org.jgrapht.alg.scoring BetweennessCentrality)
            (org.locationtech.jts.index.strtree STRtree)
@@ -97,21 +100,55 @@
        set))
 
 
+(def neta-geojson
+  (-> "data/neta/LRT_STAT.json.gz"
+      slurp-gzip
+      (charred/read-json {:key-fn keyword})))
+
+
+
+(def neta-stops
+  (->> neta-geojson
+       :features
+       (map-indexed (fn [i feature]
+                      (let [line (-> feature
+                                     :properties
+                                     :description
+                                     (#(cond (re-find #"<td>אדום</td>" %) :red
+                                             (re-find #"<td>סגול</td>" %) :purple
+                                             :else nil)))]
+                        {:stop_id (+ 1000000 i)
+                         :line line
+                         :stop_name (->> feature
+                                         :properties
+                                         :Name
+                                         (str line " - "))
+                         :stop_lat (-> feature
+                                       :geometry
+                                       :coordinates
+                                       second)
+                         :stop_lon (-> feature
+                                       :geometry
+                                       :coordinates
+                                       first)})))
+       tc/dataset))
+
+
 (def base-path
   "data/gtfs-static/public-transportation/")
 
-(defonce stops
+(defonce bus-stops
   (-> base-path
       (str "stops.csv.gz")
       (tc/dataset {:key-fn keyword})))
 
-(-> stops
-    (tc/rows :as-maps)
-    (->> (take 9)))
+(def all-stops
+  (tc/concat bus-stops
+             neta-stops))
 
 
 (def stops-with-location
-  (-> stops
+  (-> all-stops
       (tc/map-columns :WGS84 [:stop_lon :stop_lat] yx->point)
       (tc/map-columns :Israel1993 [:WGS84] WGS84->Israel1993)
       (tc/map-columns :yx [:Israel1993] point->yx)
@@ -140,16 +177,15 @@
       set))
 
 
-(defonce stop-times
+(defonce bus-stop-times
   (-> base-path
       (str "stop_times.csv.gz")
       (tc/dataset {:key-fn keyword})))
 
 (def relevant-stop-times
-  (-> stop-times
+  (-> bus-stop-times
       (tc/select-rows
        #(-> % :stop_id relevant-stop-ids))))
-
 
 
 #_(defn cartesian-product [values]
