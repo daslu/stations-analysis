@@ -100,13 +100,13 @@
        set))
 
 
-(def neta-geojson
-  (-> "data/neta/LRT_STAT.json.gz"
+(def nta-geojson
+  (-> "data/nta/LRT_STAT.json.gz"
       slurp-gzip
       (charred/read-json {:key-fn keyword})))
 
 
-#_(->> neta-geojson
+#_(->> nta-geojson
        :features
        (map (fn [feature]
               (let [line (-> feature
@@ -119,8 +119,8 @@
                  :name (-> feature :properties :Name)}))))
 
 
-(def neta-stops
-  (->> neta-geojson
+(def nta-stops
+  (->> nta-geojson
        :features
        (map-indexed (fn [i feature]
                       (let [line (-> feature
@@ -145,8 +145,8 @@
                                        first)})))
        tc/dataset))
 
-(def neta-name->stop
-  (-> neta-stops
+(def nta-name->stop
+  (-> nta-stops
       (tc/rows :as-maps)
       (->> (filter :line)
            (map (juxt :stop_name :stop_id))
@@ -157,12 +157,12 @@
        s
        (rest s)))
 
-#_(-> neta-stops
+#_(-> nta-stops
       (tc/select-rows #(-> % :line (= "red")))
       :stop_name
       vec)
 
-(def neta-edges
+(def nta-edges
   (->> [["purple - הטייסים"
          "purple - אלטלף"
          "purple - ויצמן"
@@ -242,7 +242,7 @@
         ["red - אהרונוביץ"
          "red - אם המושבות"
          "red - קרית אריה"]]
-       (map (partial map neta-name->stop))
+       (map (partial map nta-name->stop))
        (mapcat seq->pairs)))
 
 
@@ -256,7 +256,7 @@
 
 (def all-stops
   (tc/concat bus-stops
-             neta-stops))
+             nta-stops))
 
 
 (def stops-with-location
@@ -330,7 +330,7 @@
 (def edges
   (-> (distance-based-edges 250)
       (concat bus-edges
-              neta-edges)
+              nta-edges)
       distinct
       vec))
 
@@ -493,7 +493,7 @@
                                                             " "
                                                             (format "%.02f%%" (* 100 betweeness)))}})))))
              (-> edges-details
-                 (tc/select-rows #(-> % :stop_id0 (> 1000000))) ; neta
+                 (tc/select-rows #(-> % :stop_id0 (> 1000000))) ; nta
                  (tc/rows :as-maps)
                  (->> (mapv (fn [{:keys [stop_lat0 stop_lon0 stop_lat1 stop_lon1]}]
                               {:type :Feature
