@@ -310,7 +310,8 @@
                    (->> rows
                         (filter (fn [row1]
                                   (and
-                                   (not= row0 row1)
+                                   (< (:stop_id row0)
+                                      (:stop_id row1))
                                    (< (fastmath/dist (:yx row0)
                                                      (:yx row1)) radius))))
                         (map (fn [row1]
@@ -324,13 +325,14 @@
       (tc/group-by [:trip_id] {:result-type :as-seq})
       (->> (mapcat (fn [{:keys [stop_id]}]
                      (seq->pairs stop_id)))
-           (filter (partial apply not=)))
-      (concat (distance-based-edges 250))
-      distinct
-      vec
-      time))
+           (filter (partial apply not=)))))
 
-(def edges (concat neta-edges bus-edges))
+(def edges
+  (-> (distance-based-edges 250)
+      (concat bus-edges
+              neta-edges)
+      distinct
+      vec))
 
 (def vertices
   (->> relevant-stops
@@ -347,7 +349,7 @@
       (tc/select-columns [:stop_id :stop_lat :stop_lon])
       (tc/set-dataset-name nil)))
 
-(def selectesd-stop-times-lat-lon
+(def selected-stop-times-lat-lon
   (-> relevant-stop-times
       (tc/left-join relevant-stops-lat-lon [:stop_id])))
 
@@ -467,16 +469,9 @@
    {:type :FeatureCollection
     :features
     (vec
-     (concat (-> edges-details
+     (concat (-> scored-stops
                  (tc/rows :as-maps)
-                 (->> (mapv (fn [{:keys [stop_lat0 stop_lon0 stop_lat1 stop_lon1]}]
-                              {:type :Feature
-                               :geometry {:type :LineString
-                                          :coordinates [[stop_lon0 stop_lat0]
-                                                        [stop_lon1 stop_lat1]]}}))))
-             (-> scored-stops
-                 (tc/rows :as-maps)
-                 (->> (mapv (fn [{:keys [stop_name stop_lat stop_lon betweeness]}]
+                 (->> (mapv (fn [{:keys [stop_id stop_name stop_lat stop_lon betweeness]}]
                               (let [radius (if (> betweeness 0.002)
                                              50
                                              20)
@@ -492,4 +487,24 @@
                                                       :weight 1
                                                       :opacity 1
                                                       :fillOpacity 0.5}
-                                              :tooltip (str stop_name " " (format "%.02f%%" (* 100 betweeness)))}})))))))}))
+                                              :tooltip (str stop_id
+                                                            " "
+                                                            stop_name
+                                                            " "
+                                                            (format "%.02f%%" (* 100 betweeness)))}})))))
+             (-> edges-details
+                 (tc/select-rows #(-> % :stop_id0 (> 1000000))) ; neta
+                 (tc/rows :as-maps)
+                 (->> (mapv (fn [{:keys [stop_lat0 stop_lon0 stop_lat1 stop_lon1]}]
+                              {:type :Feature
+                               :geometry {:type :LineString
+                                          :coordinates [[stop_lon0 stop_lat0]
+                                                        [stop_lon1 stop_lat1]]}}))))))}))
+
+
+
+
+
+
+
+scored-stops
