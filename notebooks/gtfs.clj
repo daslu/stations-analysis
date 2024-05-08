@@ -102,13 +102,13 @@
        set))
 
 
-(def nta-geojson
-  (-> "data/nta/LRT_STAT.json.gz"
+(def dankal-geojson
+  (-> "data/dankal/LRT_STAT.json.gz"
       slurp-gzip
       (charred/read-json {:key-fn keyword})))
 
 
-#_(->> nta-geojson
+#_(->> dankal-geojson
        :features
        (map (fn [feature]
               (let [line (-> feature
@@ -121,8 +121,8 @@
                  :name (-> feature :properties :Name)}))))
 
 
-(def nta-stops
-  (->> nta-geojson
+(def dankal-stops
+  (->> dankal-geojson
        :features
        (map-indexed (fn [i feature]
                       (let [line (-> feature
@@ -148,8 +148,8 @@
        (filter :line)
        tc/dataset))
 
-(def nta-name->stop
-  (-> nta-stops
+(def dankal-name->stop
+  (-> dankal-stops
       (tc/rows :as-maps)
       (->> (filter :line)
            (map (juxt :stop_name :stop_id))
@@ -165,12 +165,12 @@
        seq->pairs
        (mapcat (juxt identity reverse))))
 
-#_(-> nta-stops
+#_(-> dankal-stops
       (tc/select-rows #(-> % :line (= "red")))
       :stop_name
       vec)
 
-(def nta-edges
+(def dankal-edges
   (->> [["purple - הטייסים"
          "purple - אלטלף"
          "purple - ויצמן"
@@ -250,7 +250,7 @@
         ["red - אהרונוביץ"
          "red - אם המושבות"
          "red - קרית אריה"]]
-       (map (partial map nta-name->stop))
+       (map (partial map dankal-name->stop))
        (mapcat seq->double-pairs)))
 
 (def base-path
@@ -263,7 +263,7 @@
 
 (def all-stops
   (tc/concat bus-stops
-             nta-stops))
+             dankal-stops))
 
 
 (def stops-with-location
@@ -338,7 +338,7 @@
 (def edges
   (-> (distance-based-edges 250)
       (concat bus-edges
-              nta-edges)
+              dankal-edges)
       distinct
       vec))
 
@@ -528,7 +528,7 @@
                                                                      (format "%.0f")))}})))))
              (-> edges-details
                  (tc/select-rows #(and (-> % :stop_id0 (> 1000000))
-                                       (-> % :stop_id1 (> 1000000)))) ; nta
+                                       (-> % :stop_id1 (> 1000000)))) ; dankal
                  (tc/rows :as-maps)
                  (->> (mapv (fn [{:keys [stop_lat0 stop_lon0 stop_lat1 stop_lon1]}]
                               {:type :Feature
