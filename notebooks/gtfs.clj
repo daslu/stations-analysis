@@ -389,16 +389,16 @@
     g))
 
 
-(def shortest-paths
-  (DijkstraShortestPath. graph))
 
 
-(-> shortest-paths
-    (.getPaths 83)
-    (.getDistanceAndPredecessorMap)
-    (->> (into {}))
-    (update-vals (fn [^Pair pair]
-                   (.getFirst pair))))
+(def score-13320
+  (-> graph
+      (DijkstraShortestPath.)
+      (.getPaths 13320)
+      (.getDistanceAndPredecessorMap)
+      (->> (into {}))
+      (update-vals (fn [^Pair pair]
+                     (.getFirst pair)))))
 
 
 (def betweeness
@@ -411,15 +411,25 @@
 (def scored-stops
   (-> relevant-stops
       (tc/map-columns :betweeness [:stop_id] betweeness)
-      (tc/log :log-betweeness :betweeness)))
+      (tc/log :log-betweeness :betweeness)
+      (tc/map-columns :score-13320 [:stop_id] score-13320)))
 
-(-> scored-stops
-    (vis.stats/histogram :betweeness {:nbins 100}))
+(delay
+  (-> scored-stops
+      (vis.stats/histogram :betweeness {:nbins 100})))
 
-(-> scored-stops
-    (tc/select-rows #(-> % :betweeness pos?))
-    (vis.stats/histogram :log-betweeness {:nbins 100}))
+(delay
+  (-> scored-stops
+      (tc/select-rows #(-> % :betweeness pos?))
+      (vis.stats/histogram :log-betweeness {:nbins 100})))
 
+
+(delay
+  (-> scored-stops
+      (tc/group-by [:score-13320])
+      (tc/aggregate {:n tc/row-count})
+      (hanami/plot ht/bar-chart {:X :score-13320
+                                 :Y :n})))
 
 (defn as-geo [vega-lite-spec]
   (-> vega-lite-spec
@@ -482,6 +492,9 @@
    {:reagent/deps [:leaflet]}))
 
 
+(def grad
+  (color/gradient [:red :yellow]))
+
 
 
 (delay
@@ -491,13 +504,13 @@
     (vec
      (concat (-> scored-stops
                  (tc/rows :as-maps)
-                 (->> (mapv (fn [{:keys [stop_id stop_name stop_lat stop_lon betweeness]}]
-                              (let [radius (if (> betweeness 0.002)
-                                             50
-                                             20)
-                                    color (if (> betweeness 0.002)
-                                            "yellow"
-                                            "cyan")]
+                 (->> (mapv (fn [{:keys [stop_id stop_name stop_lat stop_lon score-13320]}]
+                              (let [radius 50
+                                    color (or (some-> score-13320
+                                                      (/ 20)
+                                                      grad
+                                                      color/format-hex)
+                                              "black")]
                                 {:type :Feature
                                  :geometry {:type :Point
                                             :coordinates [stop_lon stop_lat]}
@@ -511,7 +524,8 @@
                                                             " "
                                                             stop_name
                                                             " "
-                                                            (format "%.02f%%" (* 100 betweeness)))}})))))
+                                                            (some->> score-13320
+                                                                     (format "%.0f")))}})))))
              (-> edges-details
                  (tc/select-rows #(and (-> % :stop_id0 (> 1000000))
                                        (-> % :stop_id1 (> 1000000)))) ; nta
