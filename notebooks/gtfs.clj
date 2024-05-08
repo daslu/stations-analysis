@@ -91,7 +91,7 @@
 
 (defn yx->statistical-areas [yx]
   (let [^Point point (apply yx->point (reverse yx))]
-    (.query ^STRtree statistical-areas-index (.getEnvelopeInternal (.buffer point 1)))))
+    (.query ^STRtree statistical-areas-index (.getEnvelopeInternal (.buffer point 100)))))
 
 (defn yx->yishuv [yx]
   (->> yx
@@ -106,6 +106,18 @@
       (charred/read-json {:key-fn keyword})))
 
 
+#_(->> neta-geojson
+       :features
+       (map (fn [feature]
+              (let [line (-> feature
+                             :properties
+                             :description
+                             (#(cond (re-find #"<td>אדום</td>" %) :red
+                                     (re-find #"<td>סגול</td>" %) :purple
+                                     :else nil)))]
+                {:line line
+                 :name (-> feature :properties :Name)}))))
+
 
 (def neta-stops
   (->> neta-geojson
@@ -114,8 +126,8 @@
                       (let [line (-> feature
                                      :properties
                                      :description
-                                     (#(cond (re-find #"<td>אדום</td>" %) :red
-                                             (re-find #"<td>סגול</td>" %) :purple
+                                     (#(cond (re-find #"<td>אדום</td>" %) "red"
+                                             (re-find #"<td>סגול</td>" %) "purple"
                                              :else nil)))]
                         {:stop_id (+ 1000000 i)
                          :line line
@@ -132,6 +144,106 @@
                                        :coordinates
                                        first)})))
        tc/dataset))
+
+(def neta-name->stop
+  (-> neta-stops
+      (tc/rows :as-maps)
+      (->> (filter :line)
+           (map (juxt :stop_name :stop_id))
+           (into {}))))
+
+(defn seq->pairs [s]
+  (map (comp sort vector)
+       s
+       (rest s)))
+
+#_(-> neta-stops
+      (tc/select-rows #(-> % :line (= "red")))
+      :stop_name
+      vec)
+
+(def neta-edges
+  (->> [["purple - הטייסים"
+         "purple - אלטלף"
+         "purple - ויצמן"
+         "purple - יהוד מרכז"
+         "purple - יהוד מערב"
+         "purple - סביונים"
+         "purple - מונוסון"
+         "purple - צומת סביון"
+         "purple - נוה סביון"
+         "purple - יגאל אלון"
+         "purple - קזז"
+         "purple - רמת פנקס"
+         "purple - מסובים"
+         "purple - אפעל דרום"
+         "purple - שיבא"
+         "purple - אפעל צפון"
+         "purple - אלוף שדה"
+         "purple - הירדן"
+         "purple - רזיאל"
+         "purple - כורזין"
+         "purple - המאבק"
+         "purple - פארק וולפסון"
+         "purple - משה דיין"
+         "purple - גבעתי"
+         "purple - האצ\"ל"
+         "purple - ההגנה"
+         "purple - נוה שאנן"
+         "purple - הר ציון"
+         "purple - העליה"
+         "purple - יהודה הלוי"
+         "purple - מונטיפיורי"
+         "purple - הכרמל"
+         "purple - מוגרבי"
+         "purple - בוגרשוב"
+         "purple - גורדון"
+         "purple - דיזנגוף"
+         "purple - אבן גבירול"
+         "purple - איכילוב"
+         "purple - מסוף ארלוזורוב"]
+        ["purple - בר אילן מזרח"
+         "purple - בר אילן מערב"
+         "purple - גני אילן"
+         "purple - גורן"
+         "purple - אפעל צפון"]
+        ["red - הקוממיות"
+         "red - העמל"
+         "red - כ\"ט בנובמבר"
+         "red - יוספטל"
+         "red - בנימין"
+         "red - בלפור"
+         "red - זבוטנסקי"
+         "red - רוטשילד"
+         "red - העצמאות"
+         "red - מחרוזת"
+         "red - הבעש\"ט"
+         "red - איסקוב"
+         "red - ארליך"
+         "red - בן צבי"
+         "red - סלמה"
+         "red - אליפלט"
+         "red - אלנבי"
+         "red - קרליבך"
+         "red - יהודית"
+         "red - שאול המלך"
+         "red - ארלוזורוב"
+         "red - אבא הלל"
+         "red - ביאליק"
+         "red - בן גוריון"
+         "red - אהרונוביץ"
+         "red - שנקר"
+         "red - שחם"
+         "red - בילינסון"
+         "red - דנקנר"
+         "red - קרול"
+         "red - פינסקר"
+         "red - תחנה מרכזית פתח"]
+        ["red - אהרונוביץ"
+         "red - אם המושבות"
+         "red - קרית אריה"]]
+       (map (partial map neta-name->stop))
+       (mapcat seq->pairs)))
 
 
 (def base-path
@@ -171,6 +283,7 @@
                                      7900
                                      9400}))))))
 
+
 (def relevant-stop-ids
   (-> relevant-stops
       :stop_id
@@ -187,28 +300,6 @@
       (tc/select-rows
        #(-> % :stop_id relevant-stop-ids))))
 
-
-#_(defn cartesian-product [values]
-    (for [v0 values
-          v1 values
-          :when (< v0 v1)]
-      [v0 v1]))
-
-
-
-#_(-> relevant-stops
-      (tc/add-column :cluster (fn [stops]
-                                (-> stops
-                                    (tc/select-columns [:x :y])
-                                    tc/rows
-                                    (clustering/dbscan 1 200)
-                                    :clustering)))
-      (tc/drop-rows #(-> % :cluster (= 2147483647)))
-      (tc/group-by [:cluster] {:result-type :as-seq})
-      (->> (mapcat (fn [cluster-stops]
-                     (-> cluster-stops
-                         :stop_id
-                         cartesian-product)))))
 
 
 (defn distance-based-edges [radius]
@@ -228,18 +319,18 @@
 
 
 
-(def edges
+(def bus-edges
   (-> relevant-stop-times
       (tc/group-by [:trip_id] {:result-type :as-seq})
       (->> (mapcat (fn [{:keys [stop_id]}]
-                     (map (comp sort vector)
-                          stop_id
-                          (rest stop_id))))
+                     (seq->pairs stop_id)))
            (filter (partial apply not=)))
       (concat (distance-based-edges 250))
       distinct
       vec
       time))
+
+(def edges (concat neta-edges bus-edges))
 
 (def vertices
   (->> relevant-stops
@@ -260,7 +351,7 @@
   (-> relevant-stop-times
       (tc/left-join relevant-stops-lat-lon [:stop_id])))
 
-(def edges-lat-lon
+(def edges-details
   (-> edges
       (->> (map (fn [[v0 v1]]
                   {:v0 v0
@@ -268,13 +359,15 @@
       tc/dataset
       (tc/left-join relevant-stops-lat-lon {:left :v0 :right :stop_id})
       (tc/left-join relevant-stops-lat-lon {:left :v1 :right :stop_id})
-      (tc/select-columns [:stop_lat :stop_lon
-                          :.stop_lat :.stop_lon])
+      (tc/select-columns [:stop_lat :.stop_lat
+                          :stop_lon :.stop_lon
+                          :stop_id :.stop_id])
       (tc/rename-columns {:stop_lat :stop_lat0
                           :stop_lon :stop_lon0
                           :.stop_lat :stop_lat1
-                          :.stop_lon :stop_lon1})))
-
+                          :.stop_lon :stop_lon1
+                          :stop_id :stop_id0
+                          :.stop_id :stop_id1})))
 
 
 (def graph
@@ -374,7 +467,7 @@
    {:type :FeatureCollection
     :features
     (vec
-     (concat (-> edges-lat-lon
+     (concat (-> edges-details
                  (tc/rows :as-maps)
                  (->> (mapv (fn [{:keys [stop_lat0 stop_lon0 stop_lat1 stop_lon1]}]
                               {:type :Feature
