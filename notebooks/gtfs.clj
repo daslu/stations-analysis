@@ -9,13 +9,15 @@
             [fastmath.clustering :as clustering]
             [fastmath.core :as fastmath]
             [charred.api :as charred]
+            [clojure.reflect :as reflect]
             [geo
              [geohash :as geohash]
              [jts :as jts]
              [spatial :as spatial]
              [io :as geoio]
              [crs :as crs]]
-            [clojure.java.io :as io])
+            [clojure.java.io :as io]
+            [clojure.string :as str])
   (:import (org.jgrapht.graph SimpleGraph SimpleWeightedGraph
                               SimpleDirectedWeightedGraph
                               AsUndirectedGraph
@@ -431,6 +433,45 @@
 
 ;; 13320 Azrieli
 ;; 50379 Petah Tikva Merkazit
+;; 48920 Savidor
+
+
+(delay
+  (let [stop-id->name (-> relevant-stops
+                          (tc/select-columns [:stop_id :stop_name])
+                          tc/rows
+                          (->> (into {})))
+        predecessors (-> #{"red"}
+                         graph
+                         (DijkstraShortestPath.)
+                         (.getPaths 50379)
+                         (.getDistanceAndPredecessorMap)
+                         (->> (into {}))
+                         (update-vals (fn [^Pair p]
+                                        [(.getFirst p)
+                                         (-> p
+                                             (.getSecond)
+                                             str
+                                             (str/replace #"[\(| |\)]" "")
+                                             (str/split #":")
+                                             (->> (mapv #(try (Integer/parseInt %)
+                                                              (catch Exception e nil)))))])))]
+    (-> (loop [v 48920
+               story []]
+          (let [[distance [next-v _]] (predecessors v)]
+            (if (< distance 1)
+              story
+              (recur next-v
+                     (conj story {:stop_id v
+                                  :stop_name (stop-id->name v)
+                                  :distance distance})))))
+        reverse
+        tc/dataset)))
+
+
+
+
+
 
 (def score
   (memoize
