@@ -16,7 +16,10 @@
              [io :as geoio]
              [crs :as crs]]
             [clojure.java.io :as io])
-  (:import (org.jgrapht.graph SimpleGraph AsUndirectedGraph DefaultEdge)
+  (:import (org.jgrapht.graph SimpleGraph SimpleWeightedGraph
+                              SimpleDirectedWeightedGraph
+                              AsUndirectedGraph
+                              DefaultEdge DefaultWeightedEdge)
            (org.jgrapht.alg.scoring BetweennessCentrality)
            org.jgrapht.alg.shortestpath.DijkstraShortestPath
            (org.locationtech.jts.index.strtree STRtree)
@@ -335,21 +338,36 @@
                      (seq->pairs stop_id)))
            (filter (partial apply not=)))))
 
-(def edges
-  (-> (distance-based-edges 250)
-      (concat bus-edges
-              dankal-edges)
-      distinct
-      vec))
-
 (def vertices
-  (->> relevant-stops
-       :stop_id
-       distinct
-       sort))
+  (memoize (fn [dankal-lines]
+             (-> relevant-stops
+                 (tc/select-rows (fn [{:keys [line]}]
+                                   (if line
+                                     (dankal-lines line)
+                                     true)))
+                 :stop_id
+                 set))))
 
-(count edges)
-(count vertices)
+(def edges
+  (memoize (fn [dankal-lines]
+             (let [vs (vertices dankal-lines)]
+               (-> (distance-based-edges 250)
+                   (concat bus-edges
+                           dankal-edges)
+                   distinct
+                   (->> (filter (fn [[v0 v1]]
+                                  (and (vs v0)
+                                       (vs v1))))))))))
+
+(count (vertices #{"red" "purple"}))
+(count (edges #{"red" "purple"}))
+
+(delay
+  (->> (edges #{"red" "purple"})
+       (map (fn [vs]
+              [(some? (some #(< % 1000000) vs))
+               (some? (some #(>= % 1000000) vs))]))
+       frequencies))
 
 
 (def relevant-stops-lat-lon
@@ -357,12 +375,10 @@
       (tc/select-columns [:stop_id :stop_lat :stop_lon])
       (tc/set-dataset-name nil)))
 
-(def selected-stop-times-lat-lon
-  (-> relevant-stop-times
-      (tc/left-join relevant-stops-lat-lon [:stop_id])))
 
-(def edges-details
-  (-> edges
+(defn edges-details [dankal-lines]
+  (-> dankal-lines
+      edges
       (->> (map (fn [[v0 v1]]
                   {:v0 v0
                    :v1 v1})))
@@ -381,54 +397,121 @@
 
 
 (def graph
-  (let [g (SimpleGraph. DefaultEdge)]
-    (doseq [v vertices]
+  (memoize (fn [dankal-lines]
+             (let [g (SimpleDirectedWeightedGraph. DefaultWeightedEdge)]
+               (doseq [v (vertices dankal-lines)]
+                 (.addVertex g v))
+               (doseq [[v0 v1] (edges dankal-lines)]
+                 (let [e (.addEdge g v0 v1)]
+                   (.setEdgeWeight
+                    g
+                    e
+                    1
+                    #_(if (and (> v0 1000000)
+                               (> v1 1000000))
+                        0.5
+                        1))))
+               g))))
+
+
+#_(let [g (SimpleDirectedWeightedGraph. DefaultWeightedEdge)]
+    (doseq [v (range 5)]
       (.addVertex g v))
-    (doseq [[v0 v1] edges]
-      (.addEdge g v0 v1))
-    g))
+    (doseq [[v0 v1] [[0 1]
+                     [1 2]]]
+      (.setEdgeWeight
+       g
+       (.addEdge g v0 v1)
+       (if (and (> v0 1000000)
+                (> v1 1000000))
+         0.5
+         1)))
+    g)
+
+
+;; 13320 Azrieli
+;; 50379 Petah Tikva Merkazit
+
+(def score
+  (memoize
+   (fn [dankal-lines target-stop-id]
+     (-> dankal-lines
+         graph
+         (DijkstraShortestPath.)
+         (.getPaths target-stop-id)
+         (.getDistanceAndPredecessorMap)
+         (->> (into {}))
+         (update-vals (fn [^Pair pair]
+                        (.getFirst pair)))))))
 
 
 
 
-(def score-13320
-  (-> graph
-      (DijkstraShortestPath.)
-      (.getPaths 13320)
-      (.getDistanceAndPredecessorMap)
+(delay
+  (-> (->> [#{} #{"red"}]
+           (map (fn [dankal-lines]
+                  (-> dankal-lines
+                      (score 50379)
+                      (->> (map (fn [[stop_id score]]
+                                  {:stop_id stop_id
+                                   :score score})))
+                      tc/dataset)))
+           (apply #(tc/left-join %1 %2 [:stop_id])))
+      (tc/map-columns :eq [:score :right.score] =)
+      :eq
+      frequencies))
+
+
+(defn betweeness [dankal-lines]
+  (-> dankal-lines
+      graph
+      (BetweennessCentrality. true)
+      .getScores
       (->> (into {}))
-      (update-vals (fn [^Pair pair]
-                     (.getFirst pair)))))
+      time))
 
 
-(def betweeness
-  (->> (BetweennessCentrality. graph true)
-       .getScores
-       (into {})
-       time))
+(delay
+  (-> (->> [#{} #{"red" "purple"}]
+           (map (fn [dankal-lines]
+                  (-> dankal-lines
+                      (score 50379)
+                      (->> (map (fn [[stop_id score]]
+                                  {:stop_id stop_id
+                                   :score score})))
+                      tc/dataset)))
+           (apply #(tc/left-join %1 %2 [:stop_id])))
+      (tc/map-columns :eq [:score :right.score] =)
+      :eq
+      frequencies))
+
 
 
 (def scored-stops
-  (-> relevant-stops
-      (tc/map-columns :betweeness [:stop_id] betweeness)
-      (tc/log :log-betweeness :betweeness)
-      (tc/map-columns :score-13320 [:stop_id] score-13320)))
+  (memoize (fn [dankal-lines target-stop-id]
+             (-> relevant-stops
+                 (tc/map-columns :betweeness [:stop_id] (betweeness dankal-lines))
+                 (tc/log :log-betweeness :betweeness)
+                 (tc/map-columns :score [:stop_id] (score dankal-lines target-stop-id))))))
 
 (delay
-  (-> scored-stops
+  (-> #{"red" "purple"}
+      scored-stops
       (vis.stats/histogram :betweeness {:nbins 100})))
 
 (delay
-  (-> scored-stops
+  (-> #{"red" "purple"}
+      scored-stops
       (tc/select-rows #(-> % :betweeness pos?))
       (vis.stats/histogram :log-betweeness {:nbins 100})))
 
 
 (delay
-  (-> scored-stops
-      (tc/group-by [:score-13320])
+  (-> #{"red" "purple"}
+      (scored-stops 50379)
+      (tc/group-by [:score])
       (tc/aggregate {:n tc/row-count})
-      (hanami/plot ht/bar-chart {:X :score-13320
+      (hanami/plot ht/bar-chart {:X :score
                                  :Y :n})))
 
 (defn as-geo [vega-lite-spec]
@@ -444,7 +527,8 @@
 
 
 (delay
-  (-> scored-stops
+  (-> #{"red" "purple"}
+      (scored-stops 50379)
       (tc/map-columns :central [:betweeness] #(> % 0.002))
       (hanami/plot ht/point-chart
                    {:X "stop_lat"
@@ -460,12 +544,12 @@
                   geojson]}]
        (.log js/console geojson)
        [:div
-        {:style {:height "900px"}
+        {:style {:height "400px"}
          :ref   (fn [el]
                   (let [m (-> js/L
                               (.map el)
                               (.setView (clj->js center)
-                                        10))]
+                                        11))]
                     (-> js/L
                         .-tileLayer
                         (.provider provider)
@@ -497,16 +581,17 @@
 
 
 
-(delay
+(defn stops-map [dankal-lines target-stop-id]
   (leaflet-map
    {:type :FeatureCollection
     :features
     (vec
-     (concat (-> scored-stops
+     (concat (-> dankal-lines
+                 (scored-stops target-stop-id)
                  (tc/rows :as-maps)
-                 (->> (mapv (fn [{:keys [stop_id stop_name stop_lat stop_lon score-13320]}]
+                 (->> (mapv (fn [{:keys [stop_id stop_name stop_lat stop_lon score]}]
                               (let [radius 50
-                                    color (or (some-> score-13320
+                                    color (or (some-> score
                                                       (/ 20)
                                                       grad
                                                       color/format-hex)
@@ -524,9 +609,10 @@
                                                             " "
                                                             stop_name
                                                             " "
-                                                            (some->> score-13320
+                                                            (some->> score
                                                                      (format "%.0f")))}})))))
-             (-> edges-details
+             (-> dankal-lines
+                 edges-details
                  (tc/select-rows #(and (-> % :stop_id0 (> 1000000))
                                        (-> % :stop_id1 (> 1000000)))) ; dankal
                  (tc/rows :as-maps)
@@ -538,8 +624,10 @@
 
 
 
+(kind/fragment
+ [(stops-map #{"red" "purple"} 50379)
+  (stops-map #{} 50379)])
 
 
 
-
-scored-stops
+:bye
