@@ -577,7 +577,7 @@
                (doseq [v (vertices dankal-lines)]
                  (.addVertex g v))
                (doseq [[w [v0 v1]] (edges dankal-lines)]
-                 (let [e (.addEdge g v0 v1)]
+                 (let [e (.addEdge g v1 v0)]
                    (.setEdgeWeight
                     g
                     e
