@@ -432,7 +432,7 @@
 (def edges
   (memoize (fn [dankal-lines]
              (let [vs (vertices dankal-lines)]
-               (-> (concat (map (weighted-edge 1)
+               (-> (concat (map (weighted-edge 2)
                                 (distance-based-edges 250))
                            (map (weighted-edge 1)
                                 bus-edges)
@@ -839,7 +839,6 @@
 (kind/fragment
  [(stops-map #{"דנקל - אדום" "דנקל - סגול"} 50379)
   (stops-map #{} 50379)])
-
 
 
 
