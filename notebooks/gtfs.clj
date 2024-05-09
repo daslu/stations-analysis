@@ -433,7 +433,7 @@
 
 
 (def vertices
-  (memoize (fn [dankal-lines]
+  (memoize (fn [{:keys [dankal-lines]}]
              (-> relevant-stops
                  (tc/select-rows (fn [{:keys [line]}]
                                    (if line
@@ -447,13 +447,14 @@
 
 
 (def edges
-  (memoize (fn [dankal-lines]
-             (let [vs (vertices dankal-lines)]
-               (-> (concat (map (weighted-edge 2)
+  (memoize (fn [{:as dankal-spec
+                 :keys [dankal-lines dist-weight dankal-weight]}]
+             (let [vs (vertices dankal-spec)]
+               (-> (concat (map (weighted-edge dist-weight)
                                 (distance-based-edges 250))
                            (map (weighted-edge 1)
                                 bus-edges)
-                           (map (weighted-edge 0.5)
+                           (map (weighted-edge dankal-weight)
                                 dankal-edges))
                    (->> (group-by second))
                    (update-vals (fn [edges]
@@ -465,16 +466,20 @@
                                   (and (vs v0)
                                        (vs v1))))))))))
 
-(count (vertices #{}))
-(count (edges #{}))
-(count (vertices #{"דנקל - אדום"}))
-(count (edges #{"דנקל - אדום"}))
-(count (vertices #{"דנקל - אדום" "דנקל - סגול"}))
-(count (edges #{"דנקל - אדום" "דנקל - סגול"}))
+(count (vertices {:dankal-lines #{}
+                  :dankal-weight 0.5
+                  :dist-weight 2}))
+(count (edges {:dankal-lines #{}
+               :dankal-weight 0.5
+               :dist-weight 2}))
+;; (count (vertices #{"דנקל - אדום"}))
+;; (count (edges #{"דנקל - אדום"} 2 0.5))
+;; (count (vertices #{"דנקל - אדום" "דנקל - סגול"}))
+;; (count (edges #{"דנקל - אדום" "דנקל - סגול"} 2 0.5))
 
 
 (delay
-  (->> (edges #{"דנקל - אדום" "דנקל - סגול"})
+  (->> (edges #{"דנקל - אדום" "דנקל - סגול"} 0.5)
        (map (fn [[_ vs]]
               [(some? (some #(< % 1000000) vs))
                (some? (some #(>= % 1000000) vs))]))
@@ -483,12 +488,12 @@
 
 (def relevant-stops-lat-lon
   (-> relevant-stops
-      (tc/select-columns [:stop_id :stop_lat :stop_lon :yx :stop_name])
+      (tc/select-columns [:stop_id :stop_lat :stop_lon :yx :stop_name :line])
       (tc/set-dataset-name nil)))
 
 
-(defn edges-details [dankal-lines]
-  (-> dankal-lines
+(defn edges-details [dankal-spec]
+  (-> dankal-spec
       edges
       (->> (map (fn [[w [v0 v1]]]
                   {:w w
@@ -502,6 +507,7 @@
                           :stop_lon :.stop_lon
                           :stop_id :.stop_id
                           :stop_name :.stop_name
+                          :line :.line
                           :w :yx-distance])
       (tc/rename-columns {:stop_lat :stop_lat0
                           :stop_lon :stop_lon0
@@ -510,15 +516,19 @@
                           :stop_id :stop_id0
                           :.stop_id :stop_id1
                           :stop_name :stop_name0
-                          :.stop_name :stop_name1})))
+                          :.stop_name :stop_name1
+                          :line :line0
+                          :.line :line1})))
 
 
-(delay (edges-details #{"דנקל - אדום" "דנקל - סגול"}))
+(delay (edges-details {:dankal-lines #{"דנקל - אדום" "דנקל - סגול"}
+                       :dankal-weight 0.5
+                       :dist-weight 2}))
 
 
 (delay
   (-> #{}
-      edges-details
+      (edges-details 0.5)
       (tc/select-rows #(-> % :w (= 1)))
       (vis.stats/histogram :yx-distance {:nbins 100})))
 
@@ -589,11 +599,11 @@
             (filter #(= % [13192 29521]))))
 
 (def graph
-  (memoize (fn [dankal-lines]
+  (memoize (fn [dankal-spec]
              (let [g (SimpleDirectedWeightedGraph. DefaultWeightedEdge)]
-               (doseq [v (vertices dankal-lines)]
+               (doseq [v (vertices dankal-spec)]
                  (.addVertex g v))
-               (doseq [[w [v0 v1]] (edges dankal-lines)]
+               (doseq [[w [v0 v1]] (edges dankal-spec)]
                  (let [e (.addEdge g v1 v0)]
                    (.setEdgeWeight
                     g
@@ -663,8 +673,8 @@
 
 (def score
   (memoize
-   (fn [dankal-lines target-stop-id]
-     (-> dankal-lines
+   (fn [dankal-spec target-stop-id]
+     (-> dankal-spec
          graph
          (DijkstraShortestPath.)
          (.getPaths target-stop-id)
@@ -680,7 +690,9 @@
   (-> (->> [#{}
             #{"דנקל - אדום" "דנקל - סגול"}]
            (map (fn [dankal-lines]
-                  (-> dankal-lines
+                  (-> {:dankal-lines dankal-lines
+                       :dankal-weight 0.5
+                       :dist-weight 2}
                       (score 50379)
                       (->> (map (fn [[stop_id score]]
                                   {:stop_id stop_id
@@ -692,8 +704,8 @@
       frequencies))
 
 
-(defn betweeness [dankal-lines]
-  (-> dankal-lines
+(defn betweeness [dankal-spec]
+  (-> dankal-spec
       graph
       (BetweennessCentrality. true)
       .getScores
@@ -704,7 +716,9 @@
 (delay
   (-> (->> [#{} #{"דנקל - אדום" "דנקל - סגול"}]
            (map (fn [dankal-lines]
-                  (-> dankal-lines
+                  (-> {:dankal-lines dankal-lines
+                       :dankal-weight 0.5
+                       :dist-weight 2}
                       (score 50379)
                       (->> (map (fn [[stop_id score]]
                                   {:stop_id stop_id
@@ -717,14 +731,16 @@
 
 
 (def scored-stops
-  (memoize (fn [dankal-lines target-stop-id]
+  (memoize (fn [dankal-spec target-stop-id]
              (-> relevant-stops
                  ;; (tc/map-columns :betweeness [:stop_id] (betweeness dankal-lines))
                  ;; (tc/log :log-betweeness :betweeness)
-                 (tc/map-columns :score [:stop_id] (score dankal-lines target-stop-id))))))
+                 (tc/map-columns :score [:stop_id] (score dankal-spec target-stop-id))))))
 
 (delay
-  (-> #{"דנקל - אדום" "דנקל - סגול"}
+  (-> {:dankal-lines #{"דנקל - אדום" "דנקל - סגול"}
+       :dankal-weight 0.5
+       :dist-weight 2}
       (scored-stops 50379)
       (vis.stats/histogram :betweeness {:nbins 100})))
 
@@ -736,7 +752,9 @@
 
 
 (delay
-  (-> #{"דנקל - אדום" "דנקל - סגול"}
+  (-> {:dankal-lines #{"דנקל - אדום" "דנקל - סגול"}
+       :dankal-weight 0.5
+       :dist-weight 2}
       (scored-stops 50379)
       (tc/group-by [:score])
       (tc/aggregate {:n tc/row-count})
@@ -756,7 +774,9 @@
 
 
 (delay
-  (-> #{"דנקל - אדום" "דנקל - סגול"}
+  (-> {:dankal-lines #{"דנקל - אדום" "דנקל - סגול"}
+       :dankal-weight 0.5
+       :dist-weight 2}
       (scored-stops 50379)
       (tc/map-columns :close [:score] #(some-> % (< 6)))
       (hanami/plot ht/point-chart
@@ -810,12 +830,12 @@
 
 
 
-(defn stops-map [dankal-lines target-stop-id]
+(defn stops-map [dankal-spec target-stop-id]
   (leaflet-map
    {:type :FeatureCollection
     :features
     (vec
-     (concat (-> dankal-lines
+     (concat (-> dankal-spec
                  (scored-stops target-stop-id)
                  (tc/rows :as-maps)
                  (->> (mapv (fn [{:keys [stop_id stop_name stop_lat stop_lon score]}]
@@ -840,7 +860,7 @@
                                                             " "
                                                             (some->> score
                                                                      (format "%.0f")))}})))))
-             (-> dankal-lines
+             (-> dankal-spec
                  edges-details
                  (tc/select-rows #(and (-> % :stop_id0 (> 1000000))
                                        (-> % :stop_id1 (> 1000000)))) ; dankal
@@ -854,8 +874,14 @@
 
 (let [target-stop-id #_13947 50379]
   (kind/fragment
-   [(stops-map #{"דנקל - אדום" "דנקל - סגול"} target-stop-id)
-    (stops-map #{} target-stop-id)]))
+   [(stops-map {:dankal-lines #{"דנקל - אדום" "דנקל - סגול"}
+                :dankal-weight 0.5
+                :dist-weight 2}
+               target-stop-id)
+    (stops-map {:dankal-lines #{}
+                :dankal-weight 0.5
+                :dist-weight 2}
+               target-stop-id)]))
 
 
 
@@ -865,7 +891,9 @@
               [:red #{"דנקל - אדום"}]
               [:red-purple #{"דנקל - אדום" "דנקל - סגול"}]]
              (map (fn [[dankal-lines-id dankal-lines]]
-                    (-> dankal-lines
+                    (-> {:dankal-lines dankal-lines
+                         :dankal-weight 0.5
+                         :dist-weight 2}
                         (scored-stops target-stop-id)
                         (tc/rows :as-maps)
                         (->> (mapcat (fn [{:keys [score sa]}]
@@ -903,7 +931,9 @@
               [:red #{"דנקל - אדום"}]
               [:red-purple #{"דנקל - אדום" "דנקל - סגול"}]]
              (map (fn [[dankal-lines-id dankal-lines]]
-                    (-> dankal-lines
+                    (-> {:dankal-lines dankal-lines
+                         :dankal-weight 0.5
+                         :dist-weight 2}
                         (scored-stops target-stop-id)
                         (tc/rows :as-maps)
                         (->> (mapcat (fn [{:keys [score yishuv]}]
@@ -968,80 +998,109 @@
                                             .-properties
                                             .-tooltip)))
                         (.addTo m))))}])
-    {:provider "Stadia.AlidadeSmoothDark"
+    {:provider "Stadia.AlidadeSmooth"
      :center   [32 34.8]
      :geojson {:type :FeatureCollection
                :features features}}]
    {:reagent/deps [:leaflet]}))
 
 
-(delay
-  (let [target-stop-id 48920]
-    (-> (->> [[:none #{}]
-              [:red #{"דנקל - אדום"}]
-              [:red-purple #{"דנקל - אדום" "דנקל - סגול"}]]
-             (map (fn [[dankal-lines-id dankal-lines]]
-                    (-> dankal-lines
-                        (scored-stops target-stop-id)
-                        (tc/rows :as-maps)
-                        (->> (mapcat (fn [{:keys [score sa]}]
-                                       (->> sa
-                                            (map (fn [sa0]
-                                                   {:sa sa0
-                                                    :score score}))))))
-                        tc/dataset
-                        (tc/add-column :dankal-lines-id
-                                       dankal-lines-id))))
-             (apply tc/concat))
-        (tc/group-by [:dankal-lines-id :sa])
-        (tc/aggregate {:score (fn [ds]
-                                (-> ds
-                                    :score
-                                    fun/mean))})
-        (tc/pivot->wider :dankal-lines-id
-                         :score)
-        (tc/map-columns :delta-red [:none :red] -)
-        (tc/map-columns :delta-purple [:red :red-purple] -)
-        (tc/select-rows #(-> % :sa first our-cities))
-        (tc/rows :as-maps)
-        (->> (mapv (fn [{:as info
-                         :keys [sa delta-red delta-purple]}]
-                     (let [signal (> delta-purple 1)
-                           statistical-area (sa->statistical-area sa)
-                           {:keys [SHEM_YISHUV STAT_2022]} (:properties statistical-area)]
-                       {:type :Feature
-                        :geometry (-> statistical-area
-                                      :geometry
-                                      geoio/to-geojson
-                                      (charred/read-json {:key-fn keyword}))
-                        :properties {:style {:radius 50
-                                             :fillColor (if signal
-                                                          "yellow"
-                                                          "black")
-                                             :color "black"
-                                             :weight 1
-                                             :opacity 0
-                                             :fillOpacity (if signal 0.5 0)}
-                                     :tooltip (format "%.02f" delta-purple)}})))
-             )
-        (concat (-> #{"דנקל - אדום" "דנקל - סגול"}
-                    edges-details
-                    (tc/select-rows #(and (-> % :stop_id0 (> 1000000))
-                                          (-> % :stop_id1 (> 1000000)))) ; dankal
-                    (tc/rows :as-maps)
-                    (->> (mapv (fn [{:keys [stop_lat0 stop_lon0 stop_lat1 stop_lon1]}]
-                                 {:type :Feature
-                                  :geometry {:type :LineString
-                                             :coordinates [[stop_lon0 stop_lat0]
-                                                           [stop_lon1 stop_lat1]]}
-                                  :properties {:style {:opacity 0.5}
-                                               :tooltip ""}})))))
-        vec
-        choropleth-map)))
+(defn map-changes [{:keys [target-stop-id
+                           dankal-weight
+                           dist-weight
+                           what-delta]}]
+  (-> (->> [[:none #{}]
+            [:red #{"דנקל - אדום"}]
+            [:red-purple #{"דנקל - אדום" "דנקל - סגול"}]]
+           (map (fn [[dankal-lines-id dankal-lines]]
+                  (-> {:dankal-lines dankal-lines
+                       :dankal-weight dankal-weight
+                       :dist-weight dist-weight}
+                      (scored-stops target-stop-id)
+                      (tc/rows :as-maps)
+                      (->> (mapcat (fn [{:keys [score sa]}]
+                                     (->> sa
+                                          (map (fn [sa0]
+                                                 {:sa sa0
+                                                  :score score}))))))
+                      tc/dataset
+                      (tc/add-column :dankal-lines-id
+                                     dankal-lines-id))))
+           (apply tc/concat))
+      (tc/group-by [:dankal-lines-id :sa])
+      (tc/aggregate {:score (fn [ds]
+                              (-> ds
+                                  :score
+                                  fun/mean))})
+      (tc/pivot->wider :dankal-lines-id
+                       :score)
+      (tc/map-columns :delta-red [:none :red] -)
+      (tc/map-columns :delta-purple [:red :red-purple] -)
+      (tc/select-rows #(-> % :sa first our-cities))
+      (tc/rows :as-maps)
+      (->> (mapv (fn [{:as info
+                       :keys [sa delta-red delta-purple]}]
+                   (let [signal (case what-delta
+                                  :purple (> delta-purple 1)
+                                  :red (> delta-red 1))
+                         statistical-area (sa->statistical-area sa)
+                         {:keys [SHEM_YISHUV STAT_2022]} (:properties statistical-area)]
+                     {:type :Feature
+                      :geometry (-> statistical-area
+                                    :geometry
+                                    geoio/to-geojson
+                                    (charred/read-json {:key-fn keyword}))
+                      :properties {:style {:radius 50
+                                           :fillColor (if signal
+                                                        "green"
+                                                        "black")
+                                           :color "black"
+                                           :weight 1
+                                           :opacity 0
+                                           :fillOpacity (if signal 0.8 0)}
+                                   :tooltip ""}}))))
+      (#(concat % (-> {:dankal-lines #{"דנקל - אדום" "דנקל - סגול"}
+                       :dankal-weight 0.5
+                       :dist-weight 1}
+                      edges-details
+                      (tc/select-rows (fn [row]
+                                        (and (:line0 row)
+                                             (:line1 row)))) ; dankal
+                      (tc/rows :as-maps)
+                      (->> (mapv (fn [{:keys [stop_lat0 stop_lon0 stop_lat1 stop_lon1 line0 line1]}]
+                                   {:type :Feature
+                                    :geometry {:type :LineString
+                                               :coordinates [[stop_lon0 stop_lat0]
+                                                             [stop_lon1 stop_lat1]]}
+                                    :properties {:style {:opacity 0.3
+                                                         :color (case line0
+                                                                  "דנקל - אדום"
+                                                                  "red"
+                                                                  "דנקל - סגול"
+                                                                  "purple")}
+                                                 :tooltip ""}}))))))
+      vec
+      choropleth-map))
 
 
-
-
+(kind/fragment
+ (for [what-delta [:red :purple]
+       dw [1 1/2 1/3]]
+   (kind/fragment
+    [(kind/hiccup
+      [:div
+       [:p (case what-delta
+             :red
+             "תועלת מהקו האדום"
+             :purple
+             "תועלת מהקו הסגול")]
+       [:p "משקל לרכבת הקלה:"
+        dw]])
+     (map-changes
+      {:target-stop-id 48920
+       :dankal-weight dw
+       :dist-weight 1
+       :what-delta what-delta})])))
 
 
 
