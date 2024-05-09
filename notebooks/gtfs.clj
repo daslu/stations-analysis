@@ -161,7 +161,7 @@
            (into {}))))
 
 (defn seq->pairs [s]
-  (map (comp sort vector)
+  (map vector
        s
        (rest s)))
 
