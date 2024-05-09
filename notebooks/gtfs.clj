@@ -10,6 +10,7 @@
             [fastmath.core :as fastmath]
             [charred.api :as charred]
             [clojure.reflect :as reflect]
+            [tech.v3.dataset.print :as print]
             [geo
              [geohash :as geohash]
              [jts :as jts]
@@ -307,10 +308,25 @@
       (str "stop_times.csv.gz")
       (tc/dataset {:key-fn keyword})))
 
+(comment
+  (-> bus-stop-times
+      (print/print-range :all)
+      (tc/head 1000)))
+
+
 (def relevant-stop-times
   (-> bus-stop-times
-      (tc/select-rows
-       #(-> % :stop_id relevant-stop-ids))))
+      (tc/group-by :trip_id)
+      (tc/without-grouping->
+       (tc/select-rows
+        (fn [row]
+          (->> row
+               :data
+               :stop_id
+               (some relevant-stop-ids)))))
+      (tc/order-by [:stop_sequence])
+      (tc/ungroup)
+      time))
 
 
 
@@ -350,14 +366,24 @@
                  :stop_id
                  set))))
 
+(defn weighted-edge [w] (fn [e] [w e]))
+
 (def edges
   (memoize (fn [dankal-lines]
              (let [vs (vertices dankal-lines)]
-               (-> (distance-based-edges 250)
-                   (concat bus-edges
-                           dankal-edges)
-                   distinct
-                   (->> (filter (fn [[v0 v1]]
+               (-> (concat (map (weighted-edge 10)
+                                (distance-based-edges 250))
+                           (map (weighted-edge 1)
+                                bus-edges)
+                           (map (weighted-edge 1)
+                                dankal-edges))
+                   (->> (group-by second))
+                   (update-vals (fn [edges]
+                                  (->> edges
+                                       (sort-by first)
+                                       first)))
+                   vals
+                   (->> (filter (fn [[w [v0 v1]]]
                                   (and (vs v0)
                                        (vs v1))))))))))
 
@@ -366,69 +392,148 @@
 
 (delay
   (->> (edges #{"דנקל - אדום" "דנקל - סגול"})
-       (map (fn [vs]
+       (map (fn [[_ vs]]
               [(some? (some #(< % 1000000) vs))
                (some? (some #(>= % 1000000) vs))]))
        frequencies))
 
 
+
 (def relevant-stops-lat-lon
   (-> relevant-stops
-      (tc/select-columns [:stop_id :stop_lat :stop_lon])
+      (tc/select-columns [:stop_id :stop_lat :stop_lon :yx :stop_name])
       (tc/set-dataset-name nil)))
 
 
 (defn edges-details [dankal-lines]
   (-> dankal-lines
       edges
-      (->> (map (fn [[v0 v1]]
-                  {:v0 v0
+      (->> (map (fn [[w [v0 v1]]]
+                  {:w w
+                   :v0 v0
                    :v1 v1})))
       tc/dataset
       (tc/left-join relevant-stops-lat-lon {:left :v0 :right :stop_id})
       (tc/left-join relevant-stops-lat-lon {:left :v1 :right :stop_id})
+      (tc/map-columns :yx-distance [:yx :.yx] fastmath/dist)
       (tc/select-columns [:stop_lat :.stop_lat
                           :stop_lon :.stop_lon
-                          :stop_id :.stop_id])
+                          :stop_id :.stop_id
+                          :stop_name :.stop_name
+                          :w :yx-distance])
       (tc/rename-columns {:stop_lat :stop_lat0
                           :stop_lon :stop_lon0
                           :.stop_lat :stop_lat1
                           :.stop_lon :stop_lon1
                           :stop_id :stop_id0
-                          :.stop_id :stop_id1})))
+                          :.stop_id :stop_id1
+                          :stop_name :stop_name0
+                          :.stop_name :stop_name1})))
 
+(delay (edges #{"דנקל - אדום" "דנקל - סגול"}))
+
+(delay (edges-details #{"דנקל - אדום" "דנקל - סגול"}))
+
+
+(delay
+  (-> #{}
+      edges-details
+      (tc/select-rows #(-> % :w (= 1)))
+      (vis.stats/histogram :yx-distance {:nbins 100})))
+
+
+(delay
+  (-> #{}
+      edges-details
+      (tc/select-rows #(and (-> % :w (= 1))
+                            (-> % :yx-distance (> 2000))))))
+
+(delay
+  (-> #{}
+      edges-details
+      (tc/select-rows #(-> % :stop_id0 (= 13807)))))
+
+(delay
+  (-> bus-stop-times
+      (tc/group-by [:trip_id] {:result-type :as-seq})
+      (->> (filter (fn [ds]
+                     (->> ds
+                          :stop_id
+                          (filter #{13192 29521})
+                          count
+                          (= 2))))
+           (filter (fn [ds]
+                     (-> ds
+                         (tc/select-rows
+                          #(-> % :stop_id (#{13192 29521})))
+                         :stop_sequence
+                         (= [34 36]))))
+           (map #(print/print-range % :all)))))
+
+
+(delay
+  (-> relevant-stop-times
+      (tc/group-by [:trip_id] {:result-type :as-seq})
+      (->> (filter (fn [ds]
+                     (->> ds
+                          :stop_id
+                          (filter #{13192 29521})
+                          count
+                          (= 2))))
+           (filter (fn [ds]
+                     (-> ds
+                         (tc/select-rows
+                          #(-> % :stop_id (#{13192 29521})))
+                         :stop_sequence
+                         (= [34 36]))))
+           (map (fn [ds]
+                  (-> ds
+                      (tc/left-join bus-stops [:stop_id])
+                      (tc/order-by [:stop_sequence]))))
+           ;; (map (fn [{:keys [stop_id]}]
+           ;;        [(vec stop_id)
+           ;;         (seq->pairs stop_id)]))
+           )
+      kind/fragment))
+
+
+(delay
+  (-> relevant-stop-times
+      (tc/select-rows #(-> % :trip_id (= "58029926_020524")))
+      (tc/left-join bus-stops :stop_id)
+      (print/print-range :all)))
+
+
+(delay (->> bus-edges
+            (filter #(= % [13192 29521]))))
 
 (def graph
   (memoize (fn [dankal-lines]
              (let [g (SimpleDirectedWeightedGraph. DefaultWeightedEdge)]
                (doseq [v (vertices dankal-lines)]
                  (.addVertex g v))
-               (doseq [[v0 v1] (edges dankal-lines)]
+               (doseq [[w [v0 v1]] (edges dankal-lines)]
                  (let [e (.addEdge g v0 v1)]
                    (.setEdgeWeight
                     g
                     e
-                    1
-                    #_(if (and (> v0 1000000)
-                               (> v1 1000000))
-                        0.5
-                        1))))
+                    w)))
                g))))
 
 
-#_(let [g (SimpleDirectedWeightedGraph. DefaultWeightedEdge)]
-    (doseq [v (range 5)]
-      (.addVertex g v))
-    (doseq [[v0 v1] [[0 1]
-                     [1 2]]]
-      (.setEdgeWeight
-       g
-       (.addEdge g v0 v1)
-       (if (and (> v0 1000000)
-                (> v1 1000000))
-         0.5
-         1)))
-    g)
+
+
+(-> #{}
+    edges
+    (->> (map (fn [[w [v0 v1]]]
+                {:w w
+                 :v0 v0
+                 :v1 v1})))
+    tc/dataset
+    (tc/left-join relevant-stops-lat-lon {:left :v0 :right :stop_id})
+    (tc/left-join relevant-stops-lat-lon {:left :v1 :right :stop_id}))
+
+(delay (graph #{"דנקל - אדום" "דנקל - סגול"}))
 
 
 ;; 13320 Azrieli
@@ -437,36 +542,40 @@
 
 
 (delay
-  (let [stop-id->name (-> relevant-stops
-                          (tc/select-columns [:stop_id :stop_name])
-                          tc/rows
-                          (->> (into {})))
-        predecessors (-> #{"דנקל - אדום"}
-                         graph
-                         (DijkstraShortestPath.)
-                         (.getPaths 50379)
-                         (.getDistanceAndPredecessorMap)
-                         (->> (into {}))
-                         (update-vals (fn [^Pair p]
-                                        [(.getFirst p)
-                                         (-> p
-                                             (.getSecond)
-                                             str
-                                             (str/replace #"[\(| |\)]" "")
-                                             (str/split #":")
-                                             (->> (mapv #(try (Integer/parseInt %)
-                                                              (catch Exception e nil)))))])))]
-    (-> (loop [v 48920
-               story []]
-          (let [[distance [next-v _]] (predecessors v)]
-            (if (< distance 1)
-              story
-              (recur next-v
-                     (conj story {:stop_id v
-                                  :stop_name (stop-id->name v)
-                                  :distance distance})))))
-        reverse
-        tc/dataset)))
+  (->> [#{} #{"דנקל - אדום"}]
+       (map (fn [dankal-lines]
+              [dankal-lines
+               (let [stop-id->name (-> relevant-stops
+                                       (tc/select-columns [:stop_id :stop_name])
+                                       tc/rows
+                                       (->> (into {})))
+                     predecessors (-> dankal-lines
+                                      graph
+                                      (DijkstraShortestPath.)
+                                      (.getPaths 50379)
+                                      (.getDistanceAndPredecessorMap)
+                                      (->> (into {}))
+                                      (update-vals (fn [^Pair p]
+                                                     [(.getFirst p)
+                                                      (-> p
+                                                          (.getSecond)
+                                                          str
+                                                          (str/replace #"[\(| |\)]" "")
+                                                          (str/split #":")
+                                                          (->> (mapv #(try (Integer/parseInt %)
+                                                                           (catch Exception e nil)))))])))]
+                 (-> (loop [v 48920
+                            story []]
+                       (let [[distance [next-v _]] (predecessors v)]
+                         (if (< distance 1)
+                           story
+                           (recur next-v
+                                  (conj story {:stop_id v
+                                               :stop_name (stop-id->name v)
+                                               :distance distance})))))
+                     reverse
+                     tc/dataset))]))
+       kind/fragment))
 
 
 
@@ -654,8 +763,8 @@
                                                                      (format "%.0f")))}})))))
              (-> dankal-lines
                  edges-details
-                 (tc/select-rows #(and (-> % :stop_id0 (> 1000000))
-                                       (-> % :stop_id1 (> 1000000)))) ; dankal
+                 #_(tc/select-rows #(and (-> % :stop_id0 (> 1000000))
+                                         (-> % :stop_id1 (> 1000000)))) ; dankal
                  (tc/rows :as-maps)
                  (->> (mapv (fn [{:keys [stop_lat0 stop_lon0 stop_lat1 stop_lon1]}]
                               {:type :Feature
@@ -666,7 +775,7 @@
 
 
 (kind/fragment
- [(stops-map #{"דנקל - אדום" "דנקל - סגול"} 50379)
+ [#_(stops-map #{"דנקל - אדום" "דנקל - סגול"} 50379)
   (stops-map #{} 50379)])
 
 
