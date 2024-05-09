@@ -1,6 +1,7 @@
 (ns gtfs
   (:require [tablecloth.api :as tc]
             [tablecloth.column.api :as tcc]
+            [tech.v3.datatype.functional :as fun]
             [scicloj.noj.v1.vis.hanami :as hanami]
             [scicloj.noj.v1.vis.stats :as vis.stats]
             [aerial.hanami.templates :as ht]
@@ -82,6 +83,13 @@
   (->> statistical-areas
        (map #(update % :geometry WGS84->Israel1993))))
 
+(def sa->statistical-area
+  (->> statistical-areas
+       (map (fn [statistical-area]
+              (let [{:keys [SEMEL_YISHUV STAT_2022]} (:properties statistical-area)]
+                [[SEMEL_YISHUV STAT_2022] statistical-area])))
+       (into {})))
+
 
 (defn make-spatial-index [rows]
   (let [tree (STRtree.)]
@@ -108,6 +116,11 @@
        (map (comp (juxt :SEMEL_YISHUV :SHEM_YISHUV) :properties))
        set))
 
+(defn yx->sa [yx]
+  (->> yx
+       yx->statistical-areas
+       (map (comp (juxt :SEMEL_YISHUV :STAT_2022) :properties))
+       set))
 
 (def dankal-geojson
   (-> "data/dankal/LRT_STAT.json.gz"
@@ -280,22 +293,26 @@
       (tc/map-columns :yx [:Israel1993] point->yx)
       (tc/map-columns :y [:yx] first)
       (tc/map-columns :x [:yx] second)
+      (tc/map-columns :sa [:yx] yx->sa)
       (tc/map-columns :yishuv [:yx] yx->yishuv)))
+
+(def our-cities
+  #{681
+    2400
+    2620
+    5000
+    6100
+    6200
+    8600
+    7900
+    9400})
 
 (def stops-in-region
   (-> stops-with-location
       (tc/select-rows (fn [{:keys [yishuv]}]
                         (->> yishuv
                              (map first)
-                             (some #{681
-                                     2400
-                                     2620
-                                     5000
-                                     6100
-                                     6200
-                                     8600
-                                     7900
-                                     9400}))))))
+                             (some our-cities))))))
 
 
 (def stop-ids-in-region
@@ -835,10 +852,193 @@
                                                         [stop_lon1 stop_lat1]]}}))))))}))
 
 
+(let [target-stop-id #_13947 50379]
+  (kind/fragment
+   [(stops-map #{"דנקל - אדום" "דנקל - סגול"} target-stop-id)
+    (stops-map #{} target-stop-id)]))
 
-(kind/fragment
- [(stops-map #{"דנקל - אדום" "דנקל - סגול"} 50379)
-  (stops-map #{} 50379)])
+
+
+(delay
+  (let [target-stop-id 48920]
+    (-> (->> [[:none #{}]
+              [:red #{"דנקל - אדום"}]
+              [:red-purple #{"דנקל - אדום" "דנקל - סגול"}]]
+             (map (fn [[dankal-lines-id dankal-lines]]
+                    (-> dankal-lines
+                        (scored-stops target-stop-id)
+                        (tc/rows :as-maps)
+                        (->> (mapcat (fn [{:keys [score sa]}]
+                                       (->> sa
+                                            (map (fn [sa0]
+                                                   {:sa sa0
+                                                    :score score}))))))
+                        tc/dataset
+                        (tc/add-column :dankal-lines-id
+                                       dankal-lines-id))))
+             (apply tc/concat))
+        (tc/group-by [:dankal-lines-id :sa])
+        (tc/aggregate {:score (fn [ds]
+                                (-> ds
+                                    :score
+                                    fun/mean))})
+        (tc/pivot->wider :dankal-lines-id
+                         :score)
+        (tc/map-columns :delta-red [:none :red] -)
+        (tc/map-columns :delta-purple [:red :red-purple] -)
+        (tc/select-rows #(> (+ (:delta-red %)
+                               (:delta-purple %))
+                            0))
+        (tc/select-rows #(-> % :sa first our-cities))
+        (hanami/plot ht/point-chart
+                     {:X :delta-red
+                      :Y :delta-purple
+                      :COLOR "sa"
+                      :MSIZE 100}))))
+
+
+(delay
+  (let [target-stop-id 48920]
+    (-> (->> [[:none #{}]
+              [:red #{"דנקל - אדום"}]
+              [:red-purple #{"דנקל - אדום" "דנקל - סגול"}]]
+             (map (fn [[dankal-lines-id dankal-lines]]
+                    (-> dankal-lines
+                        (scored-stops target-stop-id)
+                        (tc/rows :as-maps)
+                        (->> (mapcat (fn [{:keys [score yishuv]}]
+                                       (->> yishuv
+                                            (map (fn [y]
+                                                   {:yishuv y
+                                                    :score score}))))))
+                        tc/dataset
+                        (tc/add-column :dankal-lines-id
+                                       dankal-lines-id))))
+             (apply tc/concat))
+        (tc/group-by [:dankal-lines-id :yishuv])
+        (tc/aggregate {:score (fn [ds]
+                                (-> ds
+                                    :score
+                                    fun/mean))})
+        (tc/pivot->wider :dankal-lines-id
+                         :score)
+        (tc/map-columns :delta-red [:none :red] -)
+        (tc/map-columns :delta-purple [:red :red-purple] -)
+        (tc/select-rows #(> (+ (:delta-red %)
+                               (:delta-purple %))
+                            0))
+        (tc/select-rows #(-> % :yishuv first our-cities))
+        (hanami/plot ht/point-chart
+                     {:X :delta-red
+                      :Y :delta-purple
+                      :COLOR "y"
+                      :MSIZE 100}))))
+
+
+
+
+
+
+
+(defn choropleth-map [features]
+  (kind/reagent
+   ['(fn [{:keys [provider
+                  center
+                  geojson]}]
+       [:div
+        {:style {:height "600px"}
+         :ref   (fn [el]
+                  (let [m (-> js/L
+                              (.map el)
+                              (.setView (clj->js center)
+                                        11))]
+                    (-> js/L
+                        .-tileLayer
+                        (.provider provider)
+                        (.addTo m))
+                    (-> js/L
+                        (.geoJson (clj->js geojson)
+                                  (clj->js {:style (fn [feature]
+                                                     (-> feature
+                                                         .-properties
+                                                         .-style))}))
+                        (.bindTooltip (fn [layer]
+                                        (-> layer
+                                            .-feature
+                                            .-properties
+                                            .-tooltip)))
+                        (.addTo m))))}])
+    {:provider "Stadia.AlidadeSmoothDark"
+     :center   [32 34.8]
+     :geojson {:type :FeatureCollection
+               :features features}}]
+   {:reagent/deps [:leaflet]}))
+
+
+(delay
+  (let [target-stop-id 48920]
+    (-> (->> [[:none #{}]
+              [:red #{"דנקל - אדום"}]
+              [:red-purple #{"דנקל - אדום" "דנקל - סגול"}]]
+             (map (fn [[dankal-lines-id dankal-lines]]
+                    (-> dankal-lines
+                        (scored-stops target-stop-id)
+                        (tc/rows :as-maps)
+                        (->> (mapcat (fn [{:keys [score sa]}]
+                                       (->> sa
+                                            (map (fn [sa0]
+                                                   {:sa sa0
+                                                    :score score}))))))
+                        tc/dataset
+                        (tc/add-column :dankal-lines-id
+                                       dankal-lines-id))))
+             (apply tc/concat))
+        (tc/group-by [:dankal-lines-id :sa])
+        (tc/aggregate {:score (fn [ds]
+                                (-> ds
+                                    :score
+                                    fun/mean))})
+        (tc/pivot->wider :dankal-lines-id
+                         :score)
+        (tc/map-columns :delta-red [:none :red] -)
+        (tc/map-columns :delta-purple [:red :red-purple] -)
+        (tc/select-rows #(-> % :sa first our-cities))
+        (tc/rows :as-maps)
+        (->> (mapv (fn [{:as info
+                         :keys [sa delta-red delta-purple]}]
+                     (let [signal (> delta-purple 1)
+                           statistical-area (sa->statistical-area sa)
+                           {:keys [SHEM_YISHUV STAT_2022]} (:properties statistical-area)]
+                       {:type :Feature
+                        :geometry (-> statistical-area
+                                      :geometry
+                                      geoio/to-geojson
+                                      (charred/read-json {:key-fn keyword}))
+                        :properties {:style {:radius 50
+                                             :fillColor (if signal
+                                                          "yellow"
+                                                          "black")
+                                             :color "black"
+                                             :weight 1
+                                             :opacity 0
+                                             :fillOpacity (if signal 0.5 0)}
+                                     :tooltip (format "%.02f" delta-purple)}})))
+             )
+        (concat (-> #{"דנקל - אדום" "דנקל - סגול"}
+                    edges-details
+                    (tc/select-rows #(and (-> % :stop_id0 (> 1000000))
+                                          (-> % :stop_id1 (> 1000000)))) ; dankal
+                    (tc/rows :as-maps)
+                    (->> (mapv (fn [{:keys [stop_lat0 stop_lon0 stop_lat1 stop_lon1]}]
+                                 {:type :Feature
+                                  :geometry {:type :LineString
+                                             :coordinates [[stop_lon0 stop_lat0]
+                                                           [stop_lon1 stop_lat1]]}
+                                  :properties {:style {:opacity 0.5}
+                                               :tooltip ""}})))))
+        vec
+        choropleth-map)))
+
 
 
 
