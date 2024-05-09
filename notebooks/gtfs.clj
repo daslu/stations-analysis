@@ -323,7 +323,7 @@
       (tc/head 1000)))
 
 
-(def stop-times-in-region
+(def relevant-stop-times
   (-> bus-stop-times
       (tc/group-by :trip_id)
       (tc/without-grouping->
@@ -339,12 +339,14 @@
 
 
 (tc/row-count bus-stop-times)
-(tc/row-count stop-times-in-region)
+(tc/row-count relevant-stop-times)
 
 (def relevant-stop-ids
-  (-> stop-times-in-region
+  (-> relevant-stop-times
       :stop_id
+      (concat stop-ids-in-region)
       set))
+
 
 (count stop-ids-in-region)
 (count relevant-stop-ids)
@@ -352,6 +354,11 @@
 (def relevant-stops
   (-> stops-with-location
       (tc/select-rows #(-> % :stop_id relevant-stop-ids))))
+
+(delay
+  (-> relevant-stops
+      :line
+      frequencies))
 
 
 (def distance-based-edges
@@ -386,7 +393,7 @@
 
 
 (def bus-edges
-  (-> stop-times-in-region
+  (-> relevant-stop-times
       (tc/group-by [:trip_id] {:result-type :as-seq})
       (->> (mapcat (fn [{:keys [stop_id]}]
                      (seq->pairs stop_id)))
@@ -401,10 +408,16 @@
        (map (comp some? stop-ids-in-region))
        frequencies))
 
+(delay
+  (->> bus-edges
+       (apply concat)
+       (map (comp some? relevant-stop-ids))
+       frequencies))
+
 
 (def vertices
   (memoize (fn [dankal-lines]
-             (-> stops-in-region
+             (-> relevant-stops
                  (tc/select-rows (fn [{:keys [line]}]
                                    (if line
                                      (dankal-lines line)
@@ -412,7 +425,9 @@
                  :stop_id
                  set))))
 
+
 (defn weighted-edge [w] (fn [e] [w e]))
+
 
 (def edges
   (memoize (fn [dankal-lines]
@@ -421,7 +436,7 @@
                                 (distance-based-edges 250))
                            (map (weighted-edge 1)
                                 bus-edges)
-                           (map (weighted-edge 0.9)
+                           (map (weighted-edge 0.5)
                                 dankal-edges))
                    (->> (group-by second))
                    (update-vals (fn [edges]
@@ -433,8 +448,13 @@
                                   (and (vs v0)
                                        (vs v1))))))))))
 
+(count (vertices #{}))
+(count (edges #{}))
+(count (vertices #{"דנקל - אדום"}))
+(count (edges #{"דנקל - אדום"}))
 (count (vertices #{"דנקל - אדום" "דנקל - סגול"}))
 (count (edges #{"דנקל - אדום" "דנקל - סגול"}))
+
 
 (delay
   (->> (edges #{"דנקל - אדום" "דנקל - סגול"})
@@ -444,9 +464,8 @@
        frequencies))
 
 
-
 (def relevant-stops-lat-lon
-  (-> stops-in-region
+  (-> relevant-stops
       (tc/select-columns [:stop_id :stop_lat :stop_lon :yx :stop_name])
       (tc/set-dataset-name nil)))
 
@@ -476,7 +495,6 @@
                           :stop_name :stop_name0
                           :.stop_name :stop_name1})))
 
-(delay (edges #{"דנקל - אדום" "דנקל - סגול"}))
 
 (delay (edges-details #{"דנקל - אדום" "דנקל - סגול"}))
 
@@ -518,7 +536,7 @@
 
 
 (delay
-  (-> stop-times-in-region
+  (-> relevant-stop-times
       (tc/group-by [:trip_id] {:result-type :as-seq})
       (->> (filter (fn [ds]
                      (->> ds
@@ -544,7 +562,7 @@
 
 
 (delay
-  (-> stop-times-in-region
+  (-> relevant-stop-times
       (tc/select-rows #(-> % :trip_id (= "58029926_020524")))
       (tc/left-join bus-stops :stop_id)
       (print/print-range :all)))
@@ -567,19 +585,17 @@
                g))))
 
 
+(delay
+  (-> #{}
+      edges
+      (->> (map (fn [[w [v0 v1]]]
+                  {:w w
+                   :v0 v0
+                   :v1 v1})))
+      tc/dataset
+      (tc/left-join relevant-stops-lat-lon {:left :v0 :right :stop_id})
+      (tc/left-join relevant-stops-lat-lon {:left :v1 :right :stop_id})))
 
-
-(-> #{}
-    edges
-    (->> (map (fn [[w [v0 v1]]]
-                {:w w
-                 :v0 v0
-                 :v1 v1})))
-    tc/dataset
-    (tc/left-join relevant-stops-lat-lon {:left :v0 :right :stop_id})
-    (tc/left-join relevant-stops-lat-lon {:left :v1 :right :stop_id}))
-
-(delay (graph #{"דנקל - אדום" "דנקל - סגול"}))
 
 
 ;; 13320 Azrieli
@@ -591,7 +607,7 @@
   (->> [#{} #{"דנקל - אדום"}]
        (map (fn [dankal-lines]
               [dankal-lines
-               (let [stop-id->name (-> stops-in-region
+               (let [stop-id->name (-> relevant-stops
                                        (tc/select-columns [:stop_id :stop_name])
                                        tc/rows
                                        (->> (into {})))
@@ -683,22 +699,21 @@
       frequencies))
 
 
-
 (def scored-stops
   (memoize (fn [dankal-lines target-stop-id]
-             (-> stops-in-region
-                 (tc/map-columns :betweeness [:stop_id] (betweeness dankal-lines))
-                 (tc/log :log-betweeness :betweeness)
+             (-> relevant-stops
+                 ;; (tc/map-columns :betweeness [:stop_id] (betweeness dankal-lines))
+                 ;; (tc/log :log-betweeness :betweeness)
                  (tc/map-columns :score [:stop_id] (score dankal-lines target-stop-id))))))
 
 (delay
   (-> #{"דנקל - אדום" "דנקל - סגול"}
-      scored-stops
+      (scored-stops 50379)
       (vis.stats/histogram :betweeness {:nbins 100})))
 
 (delay
   (-> #{"דנקל - אדום" "דנקל - סגול"}
-      scored-stops
+      (scored-stops 50379)
       (tc/select-rows #(-> % :betweeness pos?))
       (vis.stats/histogram :log-betweeness {:nbins 100})))
 
@@ -726,11 +741,11 @@
 (delay
   (-> #{"דנקל - אדום" "דנקל - סגול"}
       (scored-stops 50379)
-      (tc/map-columns :central [:betweeness] #(> % 0.002))
+      (tc/map-columns :close [:score] #(some-> % (< 6)))
       (hanami/plot ht/point-chart
                    {:X "stop_lat"
                     :Y "stop_lon"
-                    :COLOR "central"
+                    :COLOR "close"
                     :OPACITY 0.1})
       as-geo))
 
