@@ -821,7 +821,7 @@
 (delay
   (-> {:dankal-lines #{"דנקל - אדום" "דנקל - סגול"}
        :dankal-weight 0.5
-       :dist-weight 2}
+       :dist-weight 1}
       (scored-stops 50379)
       (tc/map-columns :close [:score] #(some-> % (< 6)))
       (hanami/plot ht/point-chart
@@ -940,8 +940,8 @@
               [:red-purple #{"דנקל - אדום" "דנקל - סגול"}]]
              (map (fn [[dankal-lines-id dankal-lines]]
                     (-> {:dankal-lines dankal-lines
-                         :dankal-weight 0.5
-                         :dist-weight 2}
+                         :dankal-weight 1/3
+                         :dist-weight 1}
                         (scored-stops target-stop-id)
                         (tc/rows :as-maps)
                         (->> (mapcat (fn [{:keys [score sa]}]
@@ -960,17 +960,41 @@
                                     fun/mean))})
         (tc/pivot->wider :dankal-lines-id
                          :score)
-        (tc/map-columns :delta-red [:none :red] -)
-        (tc/map-columns :delta-purple [:red :red-purple] -)
-        (tc/select-rows #(> (+ (:delta-red %)
-                               (:delta-purple %))
-                            0))
+        (tc/map-columns :deltared [:none :red] (fn [x y]
+                                                 (max 0 (- x y))))
+        (tc/map-columns :deltapurple [:red :red-purple] (fn [x y]
+                                                          (max 0 (- x y))))
+        (tc/select-rows #(-> % :deltared (>= 0)))
+        (tc/select-rows #(-> % :deltapurple (>= 0)))
         (tc/select-rows #(-> % :sa first our-cities))
-        (hanami/plot ht/point-chart
-                     {:X :delta-red
-                      :Y :delta-purple
-                      :COLOR "sa"
-                      :MSIZE 100}))))
+        ((juxt #(hanami/plot % ht/point-chart
+                             {:X :deltared
+                              :Y :deltapurple
+                              :XTITLE "תועלת הקו האדום"
+                              :YTITLE "תועלת הקו הסגול אחרי האדום"
+                              ;; :COLOR "sa"
+                              :MSIZE 200
+                              :OPACITY 0.5})
+               #(-> %
+                    (tc/select-rows (fn [row] (-> row :deltared (> 0))))
+                    (hanami/plot ht/bar-chart
+                                 {:X :deltared
+                                  :XBIN true
+                                  :YAGG "count"
+                                  :XTITLE "תועלת הקו האדום"
+                                  :YTITLE "מספר אזורים"})
+                    (assoc-in [:encoding :x :bin]
+                              {:maxbins 50}))
+               #(-> %
+                    (tc/select-rows (fn [row] (-> row :deltapurple (> 0))))
+                    (hanami/plot ht/bar-chart
+                                 {:X :deltapurple
+                                  :XBIN true
+                                  :YAGG "count"
+                                  :XTITLE "תועלת הקו הסגול אחריהאדום"
+                                  :YTITLE "מספר אזורים"})
+                    (assoc-in [:encoding :x :bin]
+                              {:maxbins 50})))))))
 
 
 (delay
@@ -1323,11 +1347,12 @@
 
 
 (kind/fragment
- (for [target-stop-id [14349 39311 15460 ;13351
+ (for [target-stop-id [14349 39311 15460
                        49141
                        12903
                        37528
-                       ]
+                       13243
+                       13206]
        what-delta [:purple]
        dw [1/2]]
    (kind/fragment
@@ -1352,6 +1377,17 @@
 
 
 
+(let [target-stop-id #_13947 50379]
+  (kind/fragment
+   [;; (stops-map {:dankal-lines #{"דנקל - אדום" "דנקל - סגול"}
+    ;;             :dankal-weight 0.5
+    ;;             :dist-weight 2}
+    ;;            target-stop-id)
+    (stops-map {:dankal-lines #{}
+                :dankal-weight 0.5
+                :dist-weight 2}
+               target-stop-id)]))
+
 
 
 ;; 14349 - tau
@@ -1360,6 +1396,9 @@
 ;; 16205 - beilinson
 ;; 12903 - ichilov
 ;; 37528 - bursa
+
+;; 13243 - ramat hahayal
+;; 13206 - kiryat hamemshala
 
 
 :bye
