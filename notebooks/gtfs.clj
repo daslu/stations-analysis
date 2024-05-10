@@ -9,6 +9,7 @@
             [scicloj.kindly.v4.kind :as kind]
             [fastmath.clustering :as clustering]
             [fastmath.core :as fastmath]
+            [fastmath.stats :as stats]
             [charred.api :as charred]
             [clojure.reflect :as reflect]
             [tech.v3.dataset.print :as print]
@@ -331,6 +332,14 @@
            reverse)))
 
 
+(delay
+  (-> stops-in-region
+      :yishuv
+      (->> (mapcat (partial map second))
+           frequencies
+           (sort-by second)
+           reverse)))
+
 (defonce bus-stop-times
   (-> base-path
       (str "stop_times.csv.gz")
@@ -365,6 +374,8 @@
       :stop_id
       (concat stop-ids-in-region)
       set))
+
+
 
 
 (count stop-ids-in-region)
@@ -629,43 +640,50 @@
 
 ;; 13320 Azrieli
 ;; 50379 Petah Tikva Merkazit
-;; 48920 Savidor
+;; 42872 Savidor
+
+(def stop-id->name (-> relevant-stops
+                       (tc/select-columns [:stop_id :stop_name])
+                       tc/rows
+                       (->> (into {}))))
 
 
 (delay
-  (->> [#{} #{"דנקל - אדום"}]
-       (map (fn [dankal-lines]
-              [dankal-lines
-               (let [stop-id->name (-> relevant-stops
-                                       (tc/select-columns [:stop_id :stop_name])
-                                       tc/rows
-                                       (->> (into {})))
-                     predecessors (-> dankal-lines
-                                      graph
-                                      (DijkstraShortestPath.)
-                                      (.getPaths 50379)
-                                      (.getDistanceAndPredecessorMap)
-                                      (->> (into {}))
-                                      (update-vals (fn [^Pair p]
-                                                     [(.getFirst p)
-                                                      (-> p
-                                                          (.getSecond)
-                                                          str
-                                                          (str/replace #"[\(| |\)]" "")
-                                                          (str/split #":")
-                                                          (->> (mapv #(try (Integer/parseInt %)
-                                                                           (catch Exception e nil)))))])))]
-                 (-> (loop [v 48920
-                            story []]
-                       (let [[distance [next-v _]] (predecessors v)]
-                         (if (< distance 1)
-                           story
-                           (recur next-v
-                                  (conj story {:stop_id v
-                                               :stop_name (stop-id->name v)
-                                               :distance distance})))))
-                     reverse
-                     tc/dataset))]))
+  (->> [[50379 42872]
+        [50379 13947]]
+       (map (fn [[source-id target-id]]
+              (let [
+                    predecessors (-> {:dankal-lines #{}
+                                      :dankal-weight 1
+                                      :dist-weight 1}
+                                     graph
+                                     (DijkstraShortestPath.)
+                                     (.getPaths source-id)
+                                     (.getDistanceAndPredecessorMap)
+                                     (->> (into {}))
+                                     (update-vals (fn [^Pair p]
+                                                    [(.getFirst p)
+                                                     (-> p
+                                                         (.getSecond)
+                                                         str
+                                                         (str/replace #"[\(| |\)]" "")
+                                                         (str/split #":")
+                                                         (->> (mapv #(try (Integer/parseInt %)
+                                                                          (catch Exception e nil)))))])))]
+                (-> (loop [v target-id
+                           story []]
+                      (let [[distance [next-v _]] (predecessors v)]
+                        (if (< distance 1)
+                          story
+                          (recur next-v
+                                 (conj story {;; :stop_id v
+                                              :stop-name (stop-id->name v)
+                                              ;; :distance distance
+                                              })))))
+                    vec
+                    (conj {;; :stop_id source-id
+                           :stop-name (stop-id->name source-id)})
+                    tc/dataset))))
        kind/fragment))
 
 
@@ -820,12 +838,12 @@
                   geojson]}]
        (.log js/console geojson)
        [:div
-        {:style {:height "400px"}
+        {:style {:height "600px"}
          :ref   (fn [el]
                   (let [m (-> js/L
                               (.map el)
                               (.setView (clj->js center)
-                                        11))]
+                                        12))]
                     (-> js/L
                         .-tileLayer
                         (.provider provider)
@@ -839,15 +857,18 @@
                                                                          (-> feature
                                                                              .-properties
                                                                              .-style))))
-                                            :style {:opacity 0.5}}))
+                                            :style (fn [feature]
+                                                     (-> feature
+                                                         .-properties
+                                                         .-style))}))
                         (.bindTooltip (fn [layer]
                                         (-> layer
                                             .-feature
                                             .-properties
                                             .-tooltip)))
                         (.addTo m))))}])
-    {:provider "Stadia.AlidadeSmoothDark"
-     :center   [32 34.8]
+    {:provider "Stadia.AlidadeSmooth"
+     :center   [32.075 34.8]
      :geojson geojson}]
    {:reagent/deps [:leaflet]}))
 
@@ -901,10 +922,10 @@
 
 (let [target-stop-id #_13947 50379]
   (kind/fragment
-   [(stops-map {:dankal-lines #{"דנקל - אדום" "דנקל - סגול"}
-                :dankal-weight 0.5
-                :dist-weight 2}
-               target-stop-id)
+   [;; (stops-map {:dankal-lines #{"דנקל - אדום" "דנקל - סגול"}
+    ;;             :dankal-weight 0.5
+    ;;             :dist-weight 2}
+    ;;            target-stop-id)
     (stops-map {:dankal-lines #{}
                 :dankal-weight 0.5
                 :dist-weight 2}
@@ -1079,7 +1100,7 @@
                                     (charred/read-json {:key-fn keyword}))
                       :properties {:style {:radius 50
                                            :fillColor (if signal
-                                                        "green"
+                                                        "orange"
                                                         "black")
                                            :color "black"
                                            :weight 1
@@ -1159,7 +1180,7 @@
                       (tc/add-column :dankal-lines-id
                                      dankal-lines-id))))
            (apply tc/concat))
-      (tc/select-columns [:stop_id :stop_lon :stop_lat :stop_name :stop_desc :betweeness :dankal-lines-id])
+      (tc/select-columns [:stop_id :stop_lon :stop_lat :stop_name :stop_code :stop_desc :betweeness :dankal-lines-id])
       (tc/pivot->wider :dankal-lines-id
                        :betweeness)
       (tc/map-columns :change-red [:none :red] relative-change)
@@ -1187,15 +1208,34 @@
 
 
 
-
-
-
 (-> {:dankal-weight 1
      :dist-weight 1
      :what-change :purple}
     betweeness-changes
-    )
+    :none
+    (stats/quantiles (fun/* 0.05 (range 1 20))))
 
+
+
+
+(delay
+  (-> {:dankal-weight 1
+       :dist-weight 1
+       :what-change :purple}
+      betweeness-changes
+      (tc/select-rows #(-> % :stop_code (= 21379)))
+      (tc/rows :as-maps)))
+
+
+{:stop_id 13044
+ :stop_code 21379
+ :stop_name "פארק אריאל שרון/דרך לוד",
+ :stop_desc "רחוב: דרך לוד עיר: רמת גן רציף:  קומה:"
+ :none 0.004583722933093994
+ :red 0.004552342975711072
+ :red-purple 0.004473806157098106
+ :change-red -0.6845954225627795
+ :change-purple -1.725195553849912}
 
 
 
@@ -1217,50 +1257,40 @@
                        :dankal-weight dankal-weight
                        :dist-weight dist-weight}
                       (scored-stops :betweeness)
-                      (tc/rows :as-maps)
-                      (->> (mapcat (fn [{:keys [betweeness sa]}]
-                                     (->> sa
-                                          (map (fn [sa0]
-                                                 {:sa sa0
-                                                  :score betweeness}))))))
-                      tc/dataset
                       (tc/add-column :dankal-lines-id
                                      dankal-lines-id))))
            (apply tc/concat))
-      (tc/group-by [:dankal-lines-id :sa])
-      (tc/aggregate {:score (fn [ds]
-                              (-> ds
-                                  :score
-                                  fun/mean))})
+      (tc/select-columns [:stop_id :stop_name :stop_desc :betweeness :dankal-lines-id])
       (tc/pivot->wider :dankal-lines-id
-                       :score)
-      (tc/map-columns :delta-red [:none :red] relative-change)
-      (tc/map-columns :delta-purple [:red :red-purple] relative-change)
-      (tc/select-rows #(-> % :sa first our-cities))
+                       :betweeness)
+      (tc/map-columns :change-red [:none :red] relative-change)
+      (tc/map-columns :change-purple [:red :red-purple] relative-change)
+      (tc/map-columns :change-purple-abs [:change-purple] absval)
+      (tc/order-by [:change-purple-abs] :desc)
+      (tc/select-rows #(and (-> % :none (> 1/10000))
+                            (-> % :change-purple-abs (> 10))))
+      (tc/left-join all-stops [:stop_id])
       (tc/rows :as-maps)
-      (->> (mapv (fn [{:as info
-                       :keys [sa delta-red delta-purple]}]
-                   (let [signal (case what-delta
-                                  :purple (> delta-purple 0.1)
-                                  :red (> delta-red 0.1))
-                         statistical-area (sa->statistical-area sa)
-                         {:keys [SHEM_YISHUV STAT_2022]} (:properties statistical-area)]
+      (->> (mapv (fn [{:keys [stop_id stop_name stop_lon stop_lat stop_lon stop_lat change-purple]}]
+                   (let [color (if (pos? change-purple)
+                                 "brown" "blue")]
                      {:type :Feature
-                      :geometry (-> statistical-area
-                                    :geometry
-                                    geoio/to-geojson
-                                    (charred/read-json {:key-fn keyword}))
-                      :properties {:style {:radius 50
-                                           :fillColor (if signal
-                                                        "green"
-                                                        "black")
-                                           :color "black"
+                      :geometry {:type :Point
+                                 :coordinates [stop_lon stop_lat]}
+                      :properties {:style {:radius 200
+                                           :fillColor color
+                                           :color color
                                            :weight 1
-                                           :opacity 0
-                                           :fillOpacity (if signal 0.8 0)}
-                                   :tooltip ""}}))))
+                                           :opacity 0.5
+                                           :fillOpacity 0.5}
+                                   :tooltip (str stop_id
+                                                 " "
+                                                 stop_name
+                                                 " "
+                                                 (some->> change-purple
+                                                          (format "%.02f%%")))}}))))
       (#(concat % (-> {:dankal-lines #{"דנקל - אדום" "דנקל - סגול"}
-                       :dankal-weight 0.5
+                       :dankal-weight 1
                        :dist-weight 1}
                       edges-details
                       (tc/select-rows (fn [row]
@@ -1280,31 +1310,42 @@
                                                                   "purple")}
                                                  :tooltip ""}}))))))
       vec
-      choropleth-map))
+      leaflet-map))
 
 
 
+(delay
+  (-> {:dankal-weight 1
+       :dist-weight 1
+       :what-change :purple}
+      map-betweeness-changes))
 
 
 
 (kind/fragment
- (for [what-delta [;;:red
-                   :purple
-                   ]
-       dw [1 ;; 1/2 1/3
-           ]]
+ (for [target-stop-id [14349 39311 15460 ;13351
+                       49141
+                       12903
+                       37528
+                       ]
+       what-delta [:purple]
+       dw [1/2]]
    (kind/fragment
-    [;; (kind/hiccup
-     ;;  [:div
-     ;;   [:p (case what-delta
-     ;;         :red
-     ;;         "תועלת מהקו האדום"
-     ;;         :purple
-     ;;         "תועלת מהקו הסגול")]
-     ;;   [:p "משקל לרכבת הקלה:"
-     ;;    dw]])
-     (map-betweeness-changes
-      {:dankal-weight dw
+    [(kind/hiccup
+      [:div
+       [:p "יעד: "
+        (stop-id->name target-stop-id)]
+       ;; [:p (case what-delta
+       ;;       :red
+       ;;       "תועלת מהקו האדום"
+       ;;       :purple
+       ;;       "תועלת מהקו הסגול")]
+       ;; [:p "משקל לרכבת הקלה:"
+       ;;  dw]
+       ])
+     (map-changes
+      {:target-stop-id target-stop-id
+       :dankal-weight dw
        :dist-weight 1
        :what-delta what-delta})])))
 
@@ -1313,28 +1354,12 @@
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+;; 14349 - tau
+;; 39311 - bar ilan
+;; 13351 - shiba
+;; 16205 - beilinson
+;; 12903 - ichilov
+;; 37528 - bursa
 
 
 :bye
